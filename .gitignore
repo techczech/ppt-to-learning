@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node
+node_modules/
+dist/
+dist-ssr
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Project Specific
+output/
+web-app/server/uploads/
+web-app/server/storage/
+web-app/server/data.json

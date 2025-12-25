@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Course Viewer</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; margin: 0; color: #333; }
+        #sidebar { width: 300px; background: #f8f9fa; border-right: 1px solid #dee2e6; display: flex; flex-direction: column; }
+        #sidebar-header { padding: 20px; background: #fff; border-bottom: 1px solid #dee2e6; }
+        #nav-links { flex: 1; overflow-y: auto; padding: 10px 0; }
+        #content { flex: 1; padding: 50px; overflow-y: auto; background: #fff; max-width: 900px; margin: 0 auto; }
+        .slide-link { display: block; padding: 12px 20px; cursor: pointer; color: #495057; }
+        .slide-link:hover { background: #e9ecef; }
+        .slide-link.active { font-weight: 600; background: #e9ecef; color: #0d6efd; border-left: 4px solid #0d6efd; }
+        .notes { background: #fff3cd; padding: 20px; border-radius: 5px; margin-top: 40px; }
+        img { max-width: 100%; height: auto; margin: 20px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .element-text { margin-bottom: 1em; }
+        .element-title { font-size: 2em; margin-bottom: 0.5em; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div id="sidebar-header">
+            <a href="index.html">← Back to Index</a>
+            <h2 id="course-title">Loading...</h2>
+        </div>
+        <div id="nav-links"></div>
+    </div>
+    <div id="content">
+        <div id="slide-container">Select a slide...</div>
+    </div>
+
+    <script>
+        let courseData = null;
+
+        async function init() {
+            const params = new URLSearchParams(window.location.search);
+            const file = params.get('file');
+            if (!file) {
+                document.body.innerHTML = "No file specified.";
+                return;
+            }
+
+            try {
+                const res = await fetch(file);
+                courseData = await res.json();
+                render();
+            } catch (e) {
+                console.error(e);
+                document.body.innerHTML = "Error loading course data.";
+            }
+        }
+
+        function render() {
+            document.getElementById('course-title').innerText = courseData.id;
+            const nav = document.getElementById('nav-links');
+            
+            courseData.slides.forEach((slide, idx) => {
+                const div = document.createElement('div');
+                div.className = 'slide-link';
+                div.innerText = slide.title || `Slide ${slide.slide_number}`;
+                div.onclick = () => loadSlide(idx);
+                nav.appendChild(div);
+            });
+
+            if (courseData.slides.length > 0) loadSlide(0);
+        }
+
+        function loadSlide(index) {
+            const slide = courseData.slides[index];
+            const container = document.getElementById('slide-container');
+            
+            // Highlight nav
+            document.querySelectorAll('.slide-link').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+
+            let html = '';
+            
+            // Use elements array for correct order
+            if (slide.elements && slide.elements.length > 0) {
+                slide.elements.forEach(el => {
+                    if (el.type === 'title') {
+                        html += `<div class="element-title">${el.content}</div>`;
+                    } else if (el.type === 'text') {
+                        html += `<p class="element-text">${el.content.replace(/\n/g, '<br>')}</p>`;
+                    } else if (el.type === 'image') {
+                        html += `<img src="${el.content}" alt="Slide Image">`;
+                    }
+                });
+            } else {
+                // Fallback for old data or if elements missing
+                html += `<h1>${slide.title}</h1>`;
+                slide.text.forEach(t => html += `<p>${t.replace(/\n/g, '<br>')}</p>`);
+                slide.media.forEach(m => {
+                    if (m.type === 'image') {
+                        html += `<img src="${m.url}" alt="Slide Image">`;
+                    }
+                });
+            }
+
+            if (slide.notes) {
+                html += `<div class="notes"><strong>Instructor Notes:</strong><br>${slide.notes.replace(/\n/g, '<br>')}</div>`;
+            }
+
+            container.innerHTML = html;
+        }
+
+        init();
+    </script>
+</body>
+</html>
