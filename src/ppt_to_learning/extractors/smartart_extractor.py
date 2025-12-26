@@ -22,8 +22,11 @@ class SmartArtExtractor:
             if not self._is_smartart(shape): return None
             rel_id = self._get_rel_id(shape)
             if not rel_id: return None
-            try: data_part = slide_part.related_part(rel_id)
-            except: return None
+            try:
+                data_part = slide_part.related_part(rel_id)
+            except KeyError as e:
+                logger.warning(f"SmartArt relationship not found: {rel_id} - {e}")
+                return None
 
             root = etree.fromstring(data_part.blob)
 
@@ -106,12 +109,16 @@ class SmartArtExtractor:
         return None
 
     def _is_smartart(self, shape) -> bool:
-        try: return shape.element.graphic.graphicData.get("uri") == "http://schemas.openxmlformats.org/drawingml/2006/diagram"
-        except: return False
+        try:
+            return shape.element.graphic.graphicData.get("uri") == "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+        except AttributeError:
+            return False
 
     def _get_rel_id(self, shape) -> Optional[str]:
-        try: return shape.element.graphic.graphicData.find("dgm:relIds", self.NAMESPACES).get(f"{{{self.NAMESPACES['r']}}}dm")
-        except: return None
+        try:
+            return shape.element.graphic.graphicData.find("dgm:relIds", self.NAMESPACES).get(f"{{{self.NAMESPACES['r']}}}dm")
+        except AttributeError:
+            return None
 
     def _parse_points(self, root, data_part, file_id, media_dir) -> Dict[str, SmartArtNode]:
         nodes = {}
@@ -149,7 +156,8 @@ class SmartArtExtractor:
                     path = os.path.join(media_dir, fname)
                     with open(path, "wb") as f: f.write(p.blob)
                     icon = f"media/{file_id}/{fname}"
-                except: pass
+                except (KeyError, IOError) as e:
+                    logger.debug(f"Could not extract SmartArt icon: {e}")
         return icon, icon_alt
 
     def _build_tree(self, nodes_map, conns, pres_points) -> List[SmartArtNode]:
@@ -179,4 +187,6 @@ class SmartArtExtractor:
         try:
             rid = shape.element.graphic.graphicData.find("dgm:relIds", self.NAMESPACES).get(f"{{{self.NAMESPACES['r']}}}lo")
             return etree.fromstring(slide_part.related_part(rid).blob).find("dgm:title", self.NAMESPACES).get("val")
-        except: return ""
+        except (AttributeError, KeyError, TypeError) as e:
+            logger.debug(f"Could not get SmartArt layout name: {e}")
+            return ""
