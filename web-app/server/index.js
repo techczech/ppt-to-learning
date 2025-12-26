@@ -12,6 +12,7 @@ const presentationsRouter = require('./routes/presentations');
 const collectionsRouter = require('./routes/collections');
 const aiRouter = require('./routes/ai');
 const settingsRouter = require('./routes/settings');
+const slidesRouter = require('./routes/slides');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +51,7 @@ app.use('/api', presentationsRouter);
 app.use('/api', collectionsRouter);
 app.use('/api', aiRouter);
 app.use('/api', settingsRouter);
+app.use('/api', slidesRouter);
 
 // Root endpoint
 app.get('/', (req, res) => {

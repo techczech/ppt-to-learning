@@ -12,9 +12,10 @@ import {
     ChevronLeft, ChevronRight, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
     Eye, EyeOff, Grid, Maximize2, Search, ExternalLink, CheckSquare,
-    Square, Trash2, AlertCircle, ZoomIn, ZoomOut
+    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library
 } from 'lucide-react';
 import clsx from 'clsx';
+import SlidePromotionModal from '../components/SlidePromotionModal';
 
 // --- Types ---
 
@@ -431,6 +432,9 @@ export const ViewerPage: React.FC = () => {
 
     // Grid zoom state (number of columns: 2, 3, 4, or 6)
     const [gridZoom, setGridZoom] = useState(3);
+
+    // Slide promotion modal
+    const [promotionModalOpen, setPromotionModalOpen] = useState(false);
 
     const allSlides = useMemo(() => {
         if (!data) return [];
@@ -932,6 +936,15 @@ export const ViewerPage: React.FC = () => {
                         <button onClick={() => setViewMode(viewMode === 'slides' ? 'json' : 'slides')} className="p-2 hover:bg-gray-100 rounded-full" title="JSON view"><Code className="w-5 h-5"/></button>
 
                         <div className="h-6 w-px bg-gray-200" />
+
+                        <button
+                            onClick={() => setPromotionModalOpen(true)}
+                            className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-full text-xs font-bold uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md"
+                            title="Add slides to your library"
+                        >
+                            <Library className="w-4 h-4 mr-2" />
+                            Promote
+                        </button>
 
                         <button
                             onClick={() => setAIPanelOpen(true)}
@@ -1446,6 +1459,18 @@ export const ViewerPage: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* Slide Promotion Modal */}
+            <SlidePromotionModal
+                isOpen={promotionModalOpen}
+                onClose={() => setPromotionModalOpen(false)}
+                presentationId={id!}
+                presentationName={displayName}
+                onPromoted={() => {
+                    // Optionally refresh or show a notification
+                    console.log('Slides promoted to library');
+                }}
+            />
         </div>
     );
 };

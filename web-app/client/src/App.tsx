@@ -4,10 +4,11 @@ import { FileUpload } from './components/FileUpload';
 import { StatusPage } from './pages/StatusPage';
 import { BatchStatusPage } from './pages/BatchStatusPage';
 import { ViewerPage } from './pages/ViewerPage';
+import SlideLibrary from './pages/SlideLibrary';
 import { CollectionSidebar } from './components/CollectionSidebar';
 import { CollectionModal, FolderModal } from './components/CollectionModal';
 import { TagFilter, TagListDisplay } from './components/TagPills';
-import { BookOpen, FileText, RefreshCw, Clock, Settings, Trash2, Pencil, Check, X, Search } from 'lucide-react';
+import { BookOpen, FileText, RefreshCw, Clock, Settings, Trash2, Pencil, Check, X, Search, Library } from 'lucide-react';
 import {
     getManagedPresentations, reprocessPresentation, deletePresentation, updatePresentation,
     getCollections, createCollection, updateCollection as apiUpdateCollection, deleteCollection as apiDeleteCollection,
@@ -22,6 +23,7 @@ function App() {
         <BrowserRouter>
             <Routes>
                 <Route path="/" element={<Home />} />
+                <Route path="/slides" element={<SlideLibrary />} />
                 <Route path="/status/:id" element={<StatusPage />} />
                 <Route path="/batch-status" element={<BatchStatusPage />} />
                 <Route path="/viewer/:type/:id/:resultId?" element={<ViewerPage />} />
@@ -313,6 +315,13 @@ const Home: React.FC = () => {
                         <h1 className="text-xl font-bold tracking-tight">PPT to Learning</h1>
                     </div>
                     <div className="flex items-center space-x-4">
+                        <Link
+                            to="/slides"
+                            className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                        >
+                            <Library className="w-5 h-5" />
+                            <span className="text-sm font-medium">Slide Library</span>
+                        </Link>
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <input

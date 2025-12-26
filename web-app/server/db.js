@@ -27,7 +27,8 @@ const readDB = () => {
                 }],
                 folders: [],
                 tags: [],
-                presentations: []
+                presentations: [],
+                slides: []
             };
             fs.writeFileSync(DB_FILE, JSON.stringify(defaultDB, null, 2));
             return defaultDB;
@@ -39,9 +40,10 @@ const readDB = () => {
         if (!db.folders) db.folders = [];
         if (!db.tags) db.tags = [];
         if (!db.presentations) db.presentations = [];
+        if (!db.slides) db.slides = [];  // Phase 2: Slide library
         return db;
     } catch (e) {
-        return { collections: [], folders: [], tags: [], presentations: [] };
+        return { collections: [], folders: [], tags: [], presentations: [], slides: [] };
     }
 };
 
@@ -286,6 +288,178 @@ const deleteTag = (id) => {
             p.tagIds = p.tagIds.filter(tid => tid !== id);
         }
     });
+    // Remove tag from all slides
+    db.slides.forEach(s => {
+        if (s.tagIds && s.tagIds.includes(id)) {
+            s.tagIds = s.tagIds.filter(tid => tid !== id);
+        }
+    });
+    writeDB(db);
+};
+
+// ==================== SLIDES (Phase 2) ====================
+
+const getSlides = (filters = {}) => {
+    const db = readDB();
+    let slides = db.slides;
+
+    // Filter by sourceId
+    if (filters.sourceId) {
+        slides = slides.filter(s => s.sourceId === filters.sourceId);
+    }
+
+    // Filter by tagId
+    if (filters.tagId) {
+        slides = slides.filter(s => s.tagIds && s.tagIds.includes(filters.tagId));
+    }
+
+    // Filter by starred
+    if (filters.starred !== undefined) {
+        slides = slides.filter(s => s.starred === filters.starred);
+    }
+
+    // Search in title/notes
+    if (filters.search) {
+        const query = filters.search.toLowerCase();
+        slides = slides.filter(s =>
+            (s.title && s.title.toLowerCase().includes(query)) ||
+            (s.notes && s.notes.toLowerCase().includes(query))
+        );
+    }
+
+    return slides;
+};
+
+const getSlideById = (id) => {
+    const db = readDB();
+    return db.slides.find(s => s.id === id) || null;
+};
+
+const addSlide = (sourceId, sourceSlideOrder, metadata = {}) => {
+    const db = readDB();
+    const newSlide = {
+        id: uuid(),
+        sourceId,
+        sourceSlideOrder,
+        title: metadata.title || `Slide ${sourceSlideOrder}`,
+        status: 'promoted',
+        lastModified: new Date().toISOString(),
+        contentPath: null,  // null = use source JSON
+        tagIds: [],
+        starred: false,
+        notes: '',
+        metadata: {
+            layout: metadata.layout || '',
+            hasScreenshot: metadata.hasScreenshot || false,
+            contentTypes: metadata.contentTypes || [],
+            wordCount: metadata.wordCount || 0
+        }
+    };
+    db.slides.push(newSlide);
+    writeDB(db);
+    return newSlide;
+};
+
+const updateSlide = (id, updates) => {
+    const db = readDB();
+    const idx = db.slides.findIndex(s => s.id === id);
+    if (idx !== -1) {
+        const slide = db.slides[idx];
+        if (updates.title !== undefined) slide.title = updates.title;
+        if (updates.tagIds !== undefined) slide.tagIds = updates.tagIds;
+        if (updates.starred !== undefined) slide.starred = updates.starred;
+        if (updates.notes !== undefined) slide.notes = updates.notes;
+        if (updates.contentPath !== undefined) slide.contentPath = updates.contentPath;
+        if (updates.metadata !== undefined) {
+            slide.metadata = { ...slide.metadata, ...updates.metadata };
+        }
+        slide.lastModified = new Date().toISOString();
+        writeDB(db);
+        return slide;
+    }
+    return null;
+};
+
+const deleteSlide = (id) => {
+    const db = readDB();
+    db.slides = db.slides.filter(s => s.id !== id);
+    writeDB(db);
+};
+
+// Promote a single slide from a source presentation
+const promoteSlide = (sourceId, sourceSlideOrder, metadata = {}) => {
+    // Check if already promoted
+    const db = readDB();
+    const existing = db.slides.find(s =>
+        s.sourceId === sourceId && s.sourceSlideOrder === sourceSlideOrder
+    );
+    if (existing) {
+        return existing;  // Already promoted
+    }
+    return addSlide(sourceId, sourceSlideOrder, metadata);
+};
+
+// Promote multiple slides at once
+const promoteBulkSlides = (sourceId, slidesData) => {
+    const db = readDB();
+    const results = [];
+
+    for (const slideData of slidesData) {
+        const { slideOrder, ...metadata } = slideData;
+        // Check if already promoted
+        const existing = db.slides.find(s =>
+            s.sourceId === sourceId && s.sourceSlideOrder === slideOrder
+        );
+        if (existing) {
+            results.push(existing);
+        } else {
+            const newSlide = {
+                id: uuid(),
+                sourceId,
+                sourceSlideOrder: slideOrder,
+                title: metadata.title || `Slide ${slideOrder}`,
+                status: 'promoted',
+                lastModified: new Date().toISOString(),
+                contentPath: null,
+                tagIds: [],
+                starred: false,
+                notes: '',
+                metadata: {
+                    layout: metadata.layout || '',
+                    hasScreenshot: metadata.hasScreenshot || false,
+                    contentTypes: metadata.contentTypes || [],
+                    wordCount: metadata.wordCount || 0
+                }
+            };
+            db.slides.push(newSlide);
+            results.push(newSlide);
+        }
+    }
+
+    writeDB(db);
+    return results;
+};
+
+// Demote a slide (remove from library, doesn't affect source)
+const demoteSlide = (id) => {
+    deleteSlide(id);
+};
+
+// Bulk add/remove tag from slides
+const bulkTagSlides = (slideIds, tagId, action) => {
+    const db = readDB();
+    slideIds.forEach(slideId => {
+        const slide = db.slides.find(s => s.id === slideId);
+        if (slide) {
+            if (!slide.tagIds) slide.tagIds = [];
+            if (action === 'add' && !slide.tagIds.includes(tagId)) {
+                slide.tagIds.push(tagId);
+            } else if (action === 'remove') {
+                slide.tagIds = slide.tagIds.filter(tid => tid !== tagId);
+            }
+            slide.lastModified = new Date().toISOString();
+        }
+    });
     writeDB(db);
 };
 
@@ -312,5 +486,15 @@ module.exports = {
     getTags,
     addTag,
     updateTag,
-    deleteTag
+    deleteTag,
+    // Slides (Phase 2)
+    getSlides,
+    getSlideById,
+    addSlide,
+    updateSlide,
+    deleteSlide,
+    promoteSlide,
+    promoteBulkSlides,
+    demoteSlide,
+    bulkTagSlides
 };

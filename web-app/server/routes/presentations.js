@@ -179,6 +179,72 @@ router.patch('/presentations/:id', (req, res) => {
     res.json({ success: true, id });
 });
 
+// Get All Slides from Presentation (for promotion UI)
+router.get('/presentations/:id/slides', (req, res) => {
+    const { id } = req.params;
+    const presentation = db.getPresentations().find(p => p.id === id);
+    if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
+
+    const jsonPath = path.join(getStorageDir(), id, 'json', `${id}.json`);
+    if (!fs.existsSync(jsonPath)) {
+        return res.status(404).json({ error: 'Presentation JSON not found' });
+    }
+
+    try {
+        const presentationJson = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+        const promotedSlides = db.getSlides({ sourceId: id });
+
+        // Flatten sections to get all slides with metadata
+        const slides = [];
+        let slideOrder = 0;
+
+        for (const section of (presentationJson.sections || [])) {
+            for (const slide of (section.slides || [])) {
+                slideOrder++;
+                const promoted = promotedSlides.find(s => s.sourceSlideOrder === slideOrder);
+
+                // Get screenshot URL
+                const screenshotPath = path.join(getStorageDir(), id, 'screenshots', `slide_${String(slideOrder).padStart(4, '0')}.png`);
+                const hasScreenshot = fs.existsSync(screenshotPath);
+
+                // Extract content types
+                const contentTypes = [...new Set((slide.content || []).map(c => c.type))];
+
+                // Calculate word count
+                const wordCount = (slide.content || []).reduce((count, block) => {
+                    if (block.text) count += block.text.split(/\s+/).length;
+                    if (block.items) count += block.items.join(' ').split(/\s+/).length;
+                    return count;
+                }, 0);
+
+                slides.push({
+                    slideOrder,
+                    title: slide.title || `Slide ${slideOrder}`,
+                    layout: slide.layout || '',
+                    sectionTitle: section.title,
+                    hasScreenshot,
+                    screenshotUrl: hasScreenshot ? `/media/${id}/screenshots/slide_${String(slideOrder).padStart(4, '0')}.png` : null,
+                    contentTypes,
+                    wordCount,
+                    promoted: !!promoted,
+                    promotedSlideId: promoted ? promoted.id : null
+                });
+            }
+        }
+
+        res.json({
+            sourceId: id,
+            originalName: presentation.originalName,
+            totalSlides: slides.length,
+            promotedCount: promotedSlides.length,
+            slides
+        });
+    } catch (e) {
+        console.error(`Error reading presentation slides: ${e.message}`);
+        res.status(500).json({ error: 'Failed to read presentation slides' });
+    }
+});
+
 // View Presentation JSON
 router.get('/view/:id/:resultId', (req, res) => {
     const { id, resultId } = req.params;

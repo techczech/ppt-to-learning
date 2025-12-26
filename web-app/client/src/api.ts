@@ -281,6 +281,136 @@ export const deleteTag = async (id: string) => {
     return res.data;
 };
 
+// --- Slides (Phase 2: Slide Library) ---
+
+export interface Slide {
+    id: string;
+    sourceId: string;
+    sourceSlideOrder: number;
+    title: string;
+    status: 'promoted';
+    lastModified: string;
+    contentPath: string | null;
+    tagIds: string[];
+    starred: boolean;
+    notes: string;
+    metadata: {
+        layout: string;
+        hasScreenshot: boolean;
+        contentTypes: string[];
+        wordCount: number;
+    };
+    screenshotUrl?: string | null;
+}
+
+export interface SlideFilters {
+    sourceId?: string;
+    tagId?: string;
+    starred?: boolean;
+    search?: string;
+}
+
+export interface PresentationSlide {
+    slideOrder: number;
+    title: string;
+    layout: string;
+    sectionTitle: string;
+    hasScreenshot: boolean;
+    screenshotUrl: string | null;
+    contentTypes: string[];
+    wordCount: number;
+    promoted: boolean;
+    promotedSlideId: string | null;
+}
+
+export interface PresentationSlidesResponse {
+    sourceId: string;
+    originalName: string;
+    totalSlides: number;
+    promotedCount: number;
+    slides: PresentationSlide[];
+}
+
+export interface SlidePromoteData {
+    slideOrder: number;
+    title?: string;
+    layout?: string;
+    hasScreenshot?: boolean;
+    contentTypes?: string[];
+    wordCount?: number;
+}
+
+// Get all promoted slides with optional filters
+export const getSlides = async (filters?: SlideFilters): Promise<Slide[]> => {
+    const params = new URLSearchParams();
+    if (filters?.sourceId) params.append('sourceId', filters.sourceId);
+    if (filters?.tagId) params.append('tagId', filters.tagId);
+    if (filters?.starred !== undefined) params.append('starred', String(filters.starred));
+    if (filters?.search) params.append('search', filters.search);
+
+    const res = await api.get(`/slides?${params.toString()}`);
+    return res.data;
+};
+
+// Get a single slide by ID
+export const getSlideById = async (id: string): Promise<Slide> => {
+    const res = await api.get(`/slides/${id}`);
+    return res.data;
+};
+
+// Get slide content (for editing)
+export const getSlideContent = async (id: string): Promise<any> => {
+    const res = await api.get(`/slides/${id}/content`);
+    return res.data;
+};
+
+// Save edited slide content
+export const saveSlideContent = async (id: string, content: any): Promise<Slide> => {
+    const res = await api.put(`/slides/${id}/content`, content);
+    return res.data;
+};
+
+// Update slide metadata (tags, starred, notes, title)
+export const updateSlide = async (id: string, data: {
+    title?: string;
+    tagIds?: string[];
+    starred?: boolean;
+    notes?: string;
+}): Promise<Slide> => {
+    const res = await api.patch(`/slides/${id}`, data);
+    return res.data;
+};
+
+// Delete a promoted slide
+export const deleteSlide = async (id: string): Promise<{ success: boolean; id: string }> => {
+    const res = await api.delete(`/slides/${id}`);
+    return res.data;
+};
+
+// Get all slides from a presentation (for promotion UI)
+export const getPresentationSlides = async (presentationId: string): Promise<PresentationSlidesResponse> => {
+    const res = await api.get(`/presentations/${presentationId}/slides`);
+    return res.data;
+};
+
+// Promote slides from a presentation to the library
+export const promoteSlides = async (sourceId: string, slides: SlidePromoteData[]): Promise<Slide[]> => {
+    const res = await api.post(`/slides/promote`, { sourceId, slides });
+    return res.data;
+};
+
+// Demote a slide (remove from library)
+export const demoteSlide = async (id: string): Promise<{ success: boolean; id: string }> => {
+    const res = await api.post(`/slides/${id}/demote`);
+    return res.data;
+};
+
+// Bulk add/remove tags from slides
+export const bulkTagSlides = async (slideIds: string[], tagId: string, action: 'add' | 'remove'): Promise<{ success: boolean }> => {
+    const res = await api.post(`/slides/bulk-tag`, { slideIds, tagId, action });
+    return res.data;
+};
+
 // --- AI Functions ---
 
 export interface ModelInfo {
