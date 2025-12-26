@@ -1,64 +1,261 @@
-# PPT to Learning Content Converter
+# PPT to Learning
 
-Transform PowerPoint presentations (`.pptx`) into interactive, semantic web-based learning content.
+Transform PowerPoint presentations into interactive, semantic web-based learning content with AI-powered enhancement.
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## Features
 
-- **Modular Converter**: High-fidelity extraction of text, images, tables, and SmartArt.
-- **Semantic JSON**: Generates a hierarchical tree structure (Sections -> Slides -> Blocks).
-- **Interactive Web App**: A modern React-based viewer with a grouped sidebar.
-- **AI-Powered (Gemini 1.5 Flash)**:
-    - **Interpret Slide**: Get pedagogical insights and improvement suggestions.
-    - **Visual Correction**: Upload a screenshot to fix extraction or OCR errors.
-- **Live Editing**: Edit slide content directly in the browser and save changes.
-- **BYOK (Bring Your Own Key)**: Manage your own Gemini API usage.
+### Core Functionality
+- **PPTX Extraction**: High-fidelity extraction of text, images, tables, SmartArt diagrams, and embedded videos
+- **Semantic JSON Output**: Hierarchical structure (Sections → Slides → Content Blocks)
+- **Interactive Web Viewer**: Modern React-based viewer with slide navigation and search
+- **Library Management**: Organize presentations into collections with folders and tags
 
-## Project Structure
+### AI-Powered Enhancement (Google Gemini)
+- **Semantic Conversion**: Transform raw extraction into structured learning content (comparisons, sequences, definitions)
+- **Visual Correction**: Upload screenshots to fix extraction errors
+- **Batch Processing**: Convert multiple slides at once with progress tracking
 
-- `src/ppt_to_learning`: Core Python extraction logic.
-- `web-app/`: Full-stack application.
-    - `client/`: React (TypeScript) frontend.
-    - `server/`: Node.js (Express) backend.
-- `sourcefiles/`: Input PPTX files.
-- `output/`: Processed static output.
+### Web App Features
+- **Grid View**: Side-by-side comparison of original screenshots and converted content
+- **Multi-select**: Select and batch-convert slides needing review
+- **Search**: Search within presentations (press `/`) and across library
+- **Collections**: Organize presentations into projects with nested folders
+- **YouTube Embeds**: Automatically detect and embed YouTube videos from PPTX links
 
-## Installation & Setup
+## Screenshots
 
-### 1. Prerequisites
-- Python 3.10+
-- Node.js v18+
-- [Google Gemini API Key](https://aistudio.google.com/app/apikey)
+*Grid view with side-by-side screenshot and content preview, multi-select, and zoom controls*
 
-### 2. Backend Setup
+## Requirements
+
+### System Dependencies
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| Python | 3.10+ | PPTX extraction |
+| Node.js | 18+ | Web server and frontend |
+| LibreOffice | 7.0+ | Screenshot generation (optional) |
+| Poppler | - | PDF to image conversion (optional) |
+
+### API Keys
+- **Google Gemini API Key** - Required for AI features ([Get one here](https://aistudio.google.com/app/apikey))
+
+## Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/ppt-to-learning.git
+cd ppt-to-learning
+```
+
+### 2. Python Environment Setup
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install Python dependencies
+pip install python-pptx Pillow
+```
+
+### 3. Install Optional Dependencies (for Screenshots)
+
+**macOS:**
+```bash
+brew install libreoffice poppler
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install libreoffice poppler-utils
+```
+
+**Windows:**
+- Download LibreOffice from https://www.libreoffice.org/download/
+- Download Poppler from https://github.com/oschwartz10612/poppler-windows/releases
+
+### 4. Web Application Setup
+
+```bash
+# Install root dependencies (for running both servers)
+cd web-app
+npm install
+
+# Install server dependencies
+cd server
+npm install
+
+# Install client dependencies
+cd ../client
+npm install
+```
+
+### 5. Configure Environment
+
+Create a `.env` file in `web-app/server/`:
+
 ```bash
 cd web-app/server
-npm install
-# Create a .env file and add your key:
-# GEMINI_API_KEY=your_key_here
+cp .env.example .env  # Or create manually
 ```
 
-### 3. Frontend Setup
-```bash
-cd web-app/client
-npm install
+Edit `.env`:
+```env
+GEMINI_API_KEY=your_api_key_here
+PORT=3001
 ```
+
+Alternatively, you can enter your API key in the web app's Settings modal.
 
 ## Running the Application
 
-In the `web-app` directory, run:
-```bash
-npm start
-```
-This will start both the backend (port 3001) and the frontend (port 5173). Open [http://localhost:5173](http://localhost:5173) in your browser.
+### Start Both Servers (Recommended)
 
-## CLI Usage (Python Only)
+From the `web-app` directory:
 
-If you only want to process files via command line:
 ```bash
-source .venv/bin/activate
-python converter.py --input sourcefiles/czech --output output/czech
+npm run dev
 ```
 
-## Documentation
-- [Developer Guide](src/ppt_to_learning/DEVELOPER.md)
-- [Semantic Schema Proposal](SCHEMA_PROPOSAL.md)
+This starts:
+- **Backend**: http://localhost:3001
+- **Frontend**: http://localhost:5173
+
+Open http://localhost:5173 in your browser.
+
+### Start Servers Separately
+
+**Backend only:**
+```bash
+cd web-app/server
+node index.js
+```
+
+**Frontend only:**
+```bash
+cd web-app/client
+npm run dev
+```
+
+## Usage
+
+### Upload Presentations
+
+1. Drag and drop `.pptx` files onto the upload area
+2. Optionally check "Generate screenshots" for visual comparison
+3. Click "Upload" to process
+
+### View and Edit
+
+1. Click a presentation to open the viewer
+2. Use arrow keys or sidebar to navigate slides
+3. Press `g` to toggle grid view
+4. Press `/` to search within the presentation
+5. Click "Fix with Gemini" to enhance slides with AI
+
+### Batch Operations
+
+1. In grid view, select slides using checkboxes
+2. Click "Select Needing Review" to auto-select unconverted slides
+3. Click "Convert with Gemini" to batch process
+4. Use zoom controls (+/-) to adjust thumbnail size
+
+### Organize Library
+
+1. Create collections from the sidebar
+2. Drag presentations into collections
+3. Create nested folders within collections
+4. Add tags for filtering
+
+## Project Structure
+
+```
+ppt-to-learning/
+├── src/ppt_to_learning/       # Python PPTX extraction
+│   ├── core/                  # Data models
+│   └── extractors/            # PPTX parsing logic
+├── web-app/
+│   ├── client/                # React frontend (Vite + TypeScript)
+│   │   └── src/
+│   │       ├── components/    # Reusable UI components
+│   │       ├── pages/         # Page components
+│   │       └── api.ts         # API client
+│   └── server/                # Express backend
+│       ├── index.js           # API routes
+│       ├── db.js              # Data persistence
+│       └── ai.js              # Gemini integration
+├── scripts/                   # Migration utilities
+└── tests/                     # Test files
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/presentations` | List all presentations |
+| POST | `/api/upload` | Upload PPTX file |
+| GET | `/api/presentations/:id/json/:resultId` | Get presentation JSON |
+| POST | `/api/ai/semantic-convert` | AI semantic conversion |
+| GET | `/api/collections` | List collections |
+| POST | `/api/collections` | Create collection |
+
+## Keyboard Shortcuts (Viewer)
+
+| Key | Action |
+|-----|--------|
+| `←` `→` | Navigate slides |
+| `g` | Toggle grid view |
+| `t` | Toggle thumbnail |
+| `/` | Open search |
+| `Esc` | Close panels |
+
+## Configuration
+
+### Gemini Model Selection
+
+In the Settings modal, you can choose between:
+- `gemini-2.0-flash-exp` (default, fast)
+- `gemini-1.5-pro` (more capable)
+- `gemini-1.5-flash` (balanced)
+
+### Screenshot Generation
+
+Screenshots require LibreOffice and Poppler. If not installed, the app will still work but without visual comparison features.
+
+## Troubleshooting
+
+### "Failed to generate screenshots"
+- Ensure LibreOffice is installed and `soffice` is in PATH
+- Ensure Poppler is installed and `pdftoppm` is in PATH
+
+### "Failed to save collection" (404)
+- Restart the server: `cd web-app && npm run dev`
+- The server may be running old code
+
+### AI conversion fails
+- Check your Gemini API key in Settings
+- Verify you have API quota remaining
+- Try a different model in Settings
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit changes: `git commit -am 'Add my feature'`
+4. Push to branch: `git push origin feature/my-feature`
+5. Submit a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [python-pptx](https://python-pptx.readthedocs.io/) for PPTX parsing
+- [Google Gemini](https://ai.google.dev/) for AI capabilities
+- [React](https://react.dev/) + [Vite](https://vitejs.dev/) for the frontend
+- [Tailwind CSS](https://tailwindcss.com/) for styling

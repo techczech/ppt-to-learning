@@ -28,3 +28,27 @@ output/
 web-app/server/uploads/
 web-app/server/storage/
 web-app/server/data.json
+
+# Source files (user PPTX files)
+sourcefiles/
+
+# Debug scripts (not needed in repo)
+debug_*.py
+inspect_xml.py
+test_sections.py
+dummy_pptx_generator.py
+
+# Old files
+template.html
+converter.py
+gemini-history-unwanted-changes.md
+SCHEMA_PROPOSAL.md
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude
+.claude/
