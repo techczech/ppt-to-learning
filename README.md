@@ -171,6 +171,43 @@ npm run dev
 3. Create nested folders within collections
 4. Add tags for filtering
 
+## How Files Are Processed
+
+When you upload a PPTX file, here's what happens:
+
+**1. Upload**
+- File saved to `web-app/server/uploads/{uuid}.pptx`
+- Entry created in `data.json` with status `"processing"`
+
+**2. Extraction** (Python)
+- PPTX unzipped and parsed using `python-pptx`
+- Text, images, tables, SmartArt, videos extracted
+- Media files copied to `storage/{uuid}/media/`
+- JSON output saved to `storage/{uuid}/json/{uuid}.json`
+
+**3. Screenshots** (optional, requires LibreOffice)
+- LibreOffice converts PPTX → PDF
+- Poppler converts PDF → PNG images per slide
+- Saved to `storage/{uuid}/screenshots/slide_XXXX.png`
+
+**File locations:**
+```
+web-app/server/
+├── uploads/              # Original PPTX files
+│   └── {uuid}.pptx
+├── storage/              # Processed output
+│   └── {uuid}/
+│       ├── json/
+│       │   └── {uuid}.json     # Extracted content
+│       ├── media/
+│       │   └── *.png, *.mp4    # Images & videos
+│       └── screenshots/
+│           └── slide_*.png     # Slide screenshots
+└── data.json             # Library database
+```
+
+**Privacy:** All files stay local on your machine. Nothing is sent to external servers except when you use "Fix with Gemini" (which sends slide data + screenshot to Google's Gemini API).
+
 ## Project Structure
 
 ```
