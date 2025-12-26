@@ -7,34 +7,42 @@ const { spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 const db = require('./db');
 const ai = require('./ai');
+const { getConfig, saveConfig, getDataPaths, initDataDirs, isGitRepo } = require('./config');
+const gitSync = require('./git-sync');
 require('dotenv').config();
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Paths
 const ROOT_DIR = path.resolve(__dirname, '../../');
 const PYTHON_PATH = path.join(ROOT_DIR, '.venv/bin/python3');
-const CLI_PATH = path.join(ROOT_DIR, 'src/ppt_to_learning/cli.py');
 
-// Directories
-const SOURCES_DIR = path.join(__dirname, 'uploads', 'sources');
-const STORAGE_DIR = path.join(__dirname, 'storage');
+// Get dynamic paths from config
+const getSourcesDir = () => path.join(getDataPaths().uploadsPath, 'sources');
+const getStorageDir = () => getDataPaths().storagePath;
 
-// Ensure directories exist
-if (!fs.existsSync(SOURCES_DIR)) fs.mkdirSync(SOURCES_DIR, { recursive: true });
-if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR, { recursive: true });
+// Initialize data directories
+initDataDirs();
+const sourcesDir = getSourcesDir();
+if (!fs.existsSync(sourcesDir)) fs.mkdirSync(sourcesDir, { recursive: true });
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Allow larger payloads for JSON edits
 
-// Serve static media (including screenshots)
-app.use('/media', express.static(STORAGE_DIR));
+// Serve static media (including screenshots) - dynamic path
+app.use('/media', (req, res, next) => {
+    express.static(getStorageDir())(req, res, next);
+});
 // Screenshots are served via /media/{id}/screenshots/slide_XXXX.png
 
-// Configure Multer
+// Configure Multer with dynamic destination
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, SOURCES_DIR),
+    destination: (req, file, cb) => {
+        const dir = getSourcesDir();
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+    },
     filename: (req, file, cb) => {
         const id = uuidv4();
         const filename = `${id}${path.extname(file.originalname)}`;
@@ -44,6 +52,18 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 const memUpload = multer({ storage: multer.memoryStorage() });
+
+// Helper to trigger git sync after data changes
+async function triggerGitSync(action) {
+    try {
+        const result = await gitSync.sync(action);
+        if (result.success) {
+            console.log(`Git sync completed for: ${action}`);
+        }
+    } catch (e) {
+        console.error(`Git sync failed for ${action}:`, e.message);
+    }
+}
 
 // --- API ROUTES ---
 
@@ -55,10 +75,11 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     const collectionId = req.body.collectionId || null;
     const folderId = req.body.folderId || null;
     db.addPresentation(id, req.file.filename, req.file.originalname, { collectionId, folderId });
-    const outputDir = path.join(STORAGE_DIR, id);
+    const outputDir = path.join(getStorageDir(), id);
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
     runConversion(id, req.file.path, outputDir, { generateScreenshots });
+    triggerGitSync('upload presentation');
     res.json({ id: id, status: 'processing', filename: req.file.originalname, generateScreenshots });
 });
 
@@ -136,7 +157,7 @@ app.post('/api/reprocess/:id', (req, res) => {
     const id = req.params.id;
     const presentation = db.getPresentations().find(p => p.id === id);
     if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
-    runConversion(id, path.join(SOURCES_DIR, presentation.filename), path.join(STORAGE_DIR, id));
+    runConversion(id, path.join(getSourcesDir(), presentation.filename), path.join(getStorageDir(), id));
     res.json({ id, status: 'processing' });
 });
 
@@ -146,8 +167,8 @@ app.post('/api/generate-screenshots/:id', (req, res) => {
     const presentation = db.getPresentations().find(p => p.id === id);
     if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
 
-    const sourcePath = path.join(SOURCES_DIR, presentation.filename);
-    const outputDir = path.join(STORAGE_DIR, id);
+    const sourcePath = path.join(getSourcesDir(), presentation.filename);
+    const outputDir = path.join(getStorageDir(), id);
 
     if (!fs.existsSync(sourcePath)) {
         return res.status(404).json({ error: 'Source PPTX file not found' });
@@ -191,7 +212,7 @@ print(f"Generated {len(pngs)} screenshots")
 // 2c. Check Screenshots Status
 app.get('/api/screenshots/:id', (req, res) => {
     const id = req.params.id;
-    const screenshotsDir = path.join(STORAGE_DIR, id, 'screenshots');
+    const screenshotsDir = path.join(getStorageDir(), id, 'screenshots');
 
     if (!fs.existsSync(screenshotsDir)) {
         return res.json({ hasScreenshots: false, count: 0, screenshots: [] });
@@ -214,26 +235,29 @@ app.get('/api/presentations', (req, res) => {
 });
 
 // 3b. Delete Presentation
-app.delete('/api/presentations/:id', (req, res) => {
+app.delete('/api/presentations/:id', async (req, res) => {
     const id = req.params.id;
     const presentation = db.getPresentations().find(p => p.id === id);
     if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
 
     try {
         // Delete storage folder
-        const storageDir = path.join(STORAGE_DIR, id);
+        const storageDir = path.join(getStorageDir(), id);
         if (fs.existsSync(storageDir)) {
             fs.rmSync(storageDir, { recursive: true, force: true });
         }
 
         // Delete source file
-        const sourceFile = path.join(SOURCES_DIR, presentation.filename);
+        const sourceFile = path.join(getSourcesDir(), presentation.filename);
         if (fs.existsSync(sourceFile)) {
             fs.unlinkSync(sourceFile);
         }
 
         // Remove from database
         db.deletePresentation(id);
+
+        // Trigger git sync
+        triggerGitSync('delete presentation');
 
         res.json({ success: true, id });
     } catch (e) {
@@ -338,7 +362,7 @@ app.delete('/api/tags/:id', (req, res) => {
 // 4. View
 app.get('/api/view/:id/:resultId', (req, res) => {
     const { id, resultId } = req.params;
-    const filePath = path.join(STORAGE_DIR, id, 'json', `${resultId}.json`);
+    const filePath = path.join(getStorageDir(), id, 'json', `${resultId}.json`);
     if (fs.existsSync(filePath)) res.sendFile(filePath);
     else res.status(404).json({ error: 'File not found' });
 });
@@ -346,10 +370,11 @@ app.get('/api/view/:id/:resultId', (req, res) => {
 // 5. Update (Save Edits)
 app.put('/api/view/:id/:resultId', (req, res) => {
     const { id, resultId } = req.params;
-    const filePath = path.join(STORAGE_DIR, id, 'json', `${resultId}.json`);
+    const filePath = path.join(getStorageDir(), id, 'json', `${resultId}.json`);
 
     try {
         fs.writeFileSync(filePath, JSON.stringify(req.body, null, 2));
+        triggerGitSync('update presentation');
         res.json({ status: 'saved' });
     } catch (e) {
         res.status(500).json({ error: 'Failed to save edits' });
@@ -427,6 +452,128 @@ app.get('/api/status/:id', (req, res) => {
 
 app.get('/', (req, res) => {
     res.send('PPT to Learning API Server is running.');
+});
+
+// --- SETTINGS & GIT SYNC ---
+
+// Get current settings
+app.get('/api/settings', (req, res) => {
+    const config = getConfig();
+    const paths = getDataPaths();
+    res.json({
+        dataPath: config.dataPath,
+        gitSync: config.gitSync,
+        resolvedPaths: {
+            basePath: paths.basePath,
+            uploadsPath: paths.uploadsPath,
+            storagePath: paths.storagePath,
+            dataJsonPath: paths.dataJsonPath
+        },
+        isGitRepo: isGitRepo()
+    });
+});
+
+// Update settings
+app.post('/api/settings', (req, res) => {
+    const { dataPath, gitSync: gitSyncSettings } = req.body;
+
+    const updates = {};
+    if (dataPath !== undefined) updates.dataPath = dataPath;
+    if (gitSyncSettings) updates.gitSync = gitSyncSettings;
+
+    const success = saveConfig(updates);
+    if (success) {
+        // Reinitialize data directories with new path
+        initDataDirs();
+        res.json({ success: true, config: getConfig() });
+    } else {
+        res.status(500).json({ error: 'Failed to save settings' });
+    }
+});
+
+// Get git status for data repo
+app.get('/api/settings/git-status', async (req, res) => {
+    try {
+        const status = await gitSync.getStatus();
+        res.json(status);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Initialize git repo in data directory
+app.post('/api/settings/git-init', async (req, res) => {
+    try {
+        const config = getConfig();
+        if (!config.dataPath) {
+            return res.status(400).json({ error: 'No data path configured' });
+        }
+        const result = await gitSync.initRepo();
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add git remote
+app.post('/api/settings/git-remote', async (req, res) => {
+    try {
+        const { name, url } = req.body;
+        if (!name || !url) {
+            return res.status(400).json({ error: 'Remote name and URL required' });
+        }
+        const result = await gitSync.addRemote(name, url);
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Manual git sync
+app.post('/api/settings/git-sync', async (req, res) => {
+    try {
+        const { message } = req.body;
+        const commitResult = await gitSync.commit(message || 'Manual sync');
+
+        const config = getConfig();
+        let pushResult = null;
+        if (config.gitSync.autoPush) {
+            pushResult = await gitSync.push();
+        }
+
+        res.json({ commit: commitResult, push: pushResult });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Git push
+app.post('/api/settings/git-push', async (req, res) => {
+    try {
+        const result = await gitSync.push();
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Clone existing repo
+app.post('/api/settings/git-clone', async (req, res) => {
+    try {
+        const { url, path: targetPath } = req.body;
+        if (!url || !targetPath) {
+            return res.status(400).json({ error: 'Repository URL and target path required' });
+        }
+        const result = await gitSync.cloneRepo(url, targetPath);
+        if (result.success) {
+            // Update config to use the cloned repo path
+            saveConfig({ dataPath: targetPath });
+            initDataDirs();
+        }
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

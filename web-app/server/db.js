@@ -1,24 +1,37 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-
-const DB_FILE = path.join(__dirname, 'data.json');
+const { getDataPaths, initDataDirs } = require('./config');
 
 // Generate UUID
 const uuid = () => crypto.randomUUID();
 
-// Initialize DB if not exists
-if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({
-        collections: [],
-        folders: [],
-        tags: [],
-        presentations: []
-    }, null, 2));
-}
+// Get DB file path (dynamic based on config)
+const getDBFile = () => getDataPaths().dataJsonPath;
+
+// Initialize data directories on load
+initDataDirs();
 
 const readDB = () => {
+    const DB_FILE = getDBFile();
     try {
+        if (!fs.existsSync(DB_FILE)) {
+            // Create default DB structure
+            const defaultDB = {
+                collections: [{
+                    id: '1dbf97e9-b978-41af-a473-64f3e1aaef60',
+                    name: 'Default',
+                    description: 'Default collection for imported presentations',
+                    color: '#6B7280',
+                    createdAt: new Date().toISOString()
+                }],
+                folders: [],
+                tags: [],
+                presentations: []
+            };
+            fs.writeFileSync(DB_FILE, JSON.stringify(defaultDB, null, 2));
+            return defaultDB;
+        }
         const data = fs.readFileSync(DB_FILE, 'utf8');
         const db = JSON.parse(data);
         // Ensure all arrays exist (migration compatibility)
@@ -33,6 +46,7 @@ const readDB = () => {
 };
 
 const writeDB = (data) => {
+    const DB_FILE = getDBFile();
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 };
 
