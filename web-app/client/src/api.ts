@@ -347,3 +347,76 @@ export const getScreenshotUrl = (id: string, slideNumber: number) => {
 export const getMediaUrl = (conversionId: string, pathOrUrl: string) => {
     return `/media/${conversionId}/${pathOrUrl}`;
 };
+
+// --- Settings & Git Sync ---
+
+export interface GitSyncSettings {
+    enabled: boolean;
+    autoCommit: boolean;
+    autoPush: boolean;
+    commitMessage: string;
+    remote: string;
+    branch: string;
+}
+
+export interface AppSettings {
+    dataPath: string | null;
+    gitSync: GitSyncSettings;
+    resolvedPaths: {
+        basePath: string;
+        uploadsPath: string;
+        storagePath: string;
+        dataJsonPath: string;
+    };
+    isGitRepo: boolean;
+}
+
+export interface GitStatus {
+    enabled: boolean;
+    isRepo?: boolean;
+    branch?: string;
+    hasRemote?: boolean;
+    hasChanges?: boolean;
+    changes?: string[];
+    reason?: string;
+}
+
+export const getSettings = async (): Promise<AppSettings> => {
+    const res = await api.get(`/settings`);
+    return res.data;
+};
+
+export const updateSettings = async (settings: { dataPath?: string | null; gitSync?: Partial<GitSyncSettings> }): Promise<{ success: boolean; config: AppSettings }> => {
+    const res = await api.post(`/settings`, settings);
+    return res.data;
+};
+
+export const getGitStatus = async (): Promise<GitStatus> => {
+    const res = await api.get(`/settings/git-status`);
+    return res.data;
+};
+
+export const initGitRepo = async (): Promise<{ success: boolean; message?: string; error?: string }> => {
+    const res = await api.post(`/settings/git-init`);
+    return res.data;
+};
+
+export const addGitRemote = async (name: string, url: string): Promise<{ success: boolean; error?: string }> => {
+    const res = await api.post(`/settings/git-remote`, { name, url });
+    return res.data;
+};
+
+export const manualGitSync = async (message?: string): Promise<{ commit: any; push: any }> => {
+    const res = await api.post(`/settings/git-sync`, { message });
+    return res.data;
+};
+
+export const gitPush = async (): Promise<{ success: boolean; error?: string }> => {
+    const res = await api.post(`/settings/git-push`);
+    return res.data;
+};
+
+export const cloneGitRepo = async (url: string, targetPath: string): Promise<{ success: boolean; error?: string }> => {
+    const res = await api.post(`/settings/git-clone`, { url, path: targetPath });
+    return res.data;
+};
