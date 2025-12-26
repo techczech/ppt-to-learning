@@ -31,6 +31,8 @@ web-app/server/data.json
 
 # Source files (user PPTX files)
 sourcefiles/
+*.pptx
+*.ppt
 
 # Debug scripts (not needed in repo)
 debug_*.py
