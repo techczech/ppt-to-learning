@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Save, X, CheckCircle, MessageSquare, Terminal } from 'lucide-react';
-import { 
-    getStoredApiKey, setStoredApiKey, 
-    getStoredPrompt, setStoredPrompt, 
-    DEFAULT_PROMPTS 
+import { Save, X, CheckCircle, Terminal, Cpu } from 'lucide-react';
+import {
+    getStoredApiKey, setStoredApiKey,
+    getStoredPrompt, setStoredPrompt,
+    getStoredModel, setStoredModel,
+    getAvailableModels,
+    DEFAULT_PROMPTS,
+    type ModelsResponse
 } from '../api';
 import clsx from 'clsx';
 
@@ -17,6 +20,8 @@ type Tab = 'api' | 'prompts';
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
     const [activeTab, setActiveTab] = useState<Tab>('api');
     const [apiKey, setApiKey] = useState('');
+    const [selectedModel, setSelectedModel] = useState('');
+    const [modelsData, setModelsData] = useState<ModelsResponse | null>(null);
     const [analyzePrompt, setAnalyzePrompt] = useState('');
     const [fixPrompt, setFixPrompt] = useState('');
     const [status, setStatus] = useState<'idle' | 'saved'>('idle');
@@ -24,14 +29,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     useEffect(() => {
         if (isOpen) {
             setApiKey(getStoredApiKey());
+            setSelectedModel(getStoredModel());
             setAnalyzePrompt(getStoredPrompt('analyze'));
             setFixPrompt(getStoredPrompt('fix'));
             setStatus('idle');
+
+            // Fetch available models
+            getAvailableModels().then(data => {
+                setModelsData(data);
+                // Set default if no model selected
+                if (!getStoredModel() && data.default) {
+                    setSelectedModel(data.default);
+                }
+            }).catch(console.error);
         }
     }, [isOpen]);
 
     const handleSave = () => {
         setStoredApiKey(apiKey);
+        setStoredModel(selectedModel);
         setStoredPrompt('analyze', analyzePrompt);
         setStoredPrompt('fix', fixPrompt);
         setStatus('saved');
@@ -83,17 +99,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-8">
                     {activeTab === 'api' ? (
-                        <div className="space-y-6">
+                        <div className="space-y-8">
                             <div>
-                                <h4 className="text-sm font-bold text-gray-800 mb-2">Gemini 1.5 Flash Key</h4>
+                                <h4 className="text-sm font-bold text-gray-800 mb-2">Gemini API Key</h4>
                                 <p className="text-xs text-gray-500 mb-4">Provided keys are stored only in your local browser storage.</p>
-                                <input 
-                                    type="password" 
+                                <input
+                                    type="password"
                                     className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-mono text-sm"
-                                    placeholder="Enter Sk-..."
+                                    placeholder="Enter your Gemini API key..."
                                     value={apiKey}
                                     onChange={(e) => setApiKey(e.target.value)}
                                 />
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-800 mb-2 flex items-center">
+                                    <Cpu className="w-4 h-4 mr-2" />
+                                    Model Selection
+                                </h4>
+                                <p className="text-xs text-gray-500 mb-4">Choose which Gemini model to use for AI features.</p>
+                                {modelsData ? (
+                                    <div className="space-y-2">
+                                        {Object.entries(modelsData.models).map(([modelId, info]) => (
+                                            <label
+                                                key={modelId}
+                                                className={clsx(
+                                                    "flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all",
+                                                    selectedModel === modelId
+                                                        ? "border-blue-500 bg-blue-50"
+                                                        : "border-gray-200 hover:border-gray-300 bg-gray-50"
+                                                )}
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    name="model"
+                                                    value={modelId}
+                                                    checked={selectedModel === modelId}
+                                                    onChange={(e) => setSelectedModel(e.target.value)}
+                                                    className="sr-only"
+                                                />
+                                                <div className="flex-1">
+                                                    <div className="flex items-center">
+                                                        <span className="font-bold text-gray-800">{info.name}</span>
+                                                        {modelId === modelsData.default && (
+                                                            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-full uppercase">Default</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="text-xs text-gray-500">{info.description}</span>
+                                                </div>
+                                                <div className={clsx(
+                                                    "w-5 h-5 rounded-full border-2 flex items-center justify-center",
+                                                    selectedModel === modelId ? "border-blue-500 bg-blue-500" : "border-gray-300"
+                                                )}>
+                                                    {selectedModel === modelId && (
+                                                        <div className="w-2 h-2 bg-white rounded-full" />
+                                                    )}
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-gray-400 italic">Loading models...</div>
+                                )}
                             </div>
                         </div>
                     ) : (

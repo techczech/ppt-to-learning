@@ -1,14 +1,12 @@
 {
-  "name": "ppt-to-learning-app",
+  "name": "ppt-to-learning-webapp",
   "version": "1.0.0",
-  "description": "PPT to Learning Web Application",
   "scripts": {
-    "start": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && npm start",
-    "client": "cd client && npm run dev",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && node index.js",
+    "client": "cd client && npm run dev"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^8.2.2"
   }
 }

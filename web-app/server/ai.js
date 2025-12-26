@@ -1,11 +1,112 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
-function getModel(userKey) {
+// Available Gemini models - updated December 2025
+// See: https://ai.google.dev/gemini-api/docs/models
+const AVAILABLE_MODELS = {
+    "gemini-3-flash-preview": { name: "Gemini 3 Flash", description: "Latest flash model (recommended)" },
+    "gemini-3-pro-preview": { name: "Gemini 3 Pro", description: "Most capable reasoning model" },
+    "gemini-2.5-flash": { name: "Gemini 2.5 Flash", description: "Stable, fast and efficient" },
+    "gemini-2.5-flash-lite": { name: "Gemini 2.5 Flash Lite", description: "Lightweight, fastest, lowest cost" },
+    "gemini-2.5-pro": { name: "Gemini 2.5 Pro", description: "Stable pro with adaptive thinking" },
+    "gemini-2.0-flash": { name: "Gemini 2.0 Flash", description: "Previous generation flash" },
+    "gemini-2.0-flash-lite": { name: "Gemini 2.0 Flash Lite", description: "Previous generation lite" }
+};
+
+const DEFAULT_MODEL = "gemini-3-flash-preview";
+
+function getModel(userKey, modelName = DEFAULT_MODEL) {
     const key = userKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error("No Gemini API Key provided.");
     const genAI = new GoogleGenerativeAI(key);
-    return genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Use provided model or fall back to default
+    const model = AVAILABLE_MODELS[modelName] ? modelName : DEFAULT_MODEL;
+    return genAI.getGenerativeModel({ model });
+}
+
+function getAvailableModels() {
+    return { models: AVAILABLE_MODELS, default: DEFAULT_MODEL };
+}
+
+// Simple prompt for semantic conversion - no schema constraint
+const SEMANTIC_PROMPT = `
+Analyze this slide screenshot and convert it to semantic learning content.
+
+Current extracted content (may be incomplete or in wrong order):
+{{RAW_EXTRACTION}}
+
+TASK: Look at the VISUAL LAYOUT to understand how content is organized:
+- What groups exist? (identified by position, color, icons, visual containers)
+- What is the relationship between groups? (comparison, sequence, hierarchy)
+- What visual cues convey meaning? (cyclic icons = repetition, arrows = sequence, columns = comparison)
+
+OUTPUT: Return ONLY valid JSON (no markdown, no explanation) in this exact format:
+
+{
+  "title": "slide title if visible",
+  "summary": "one sentence describing what this slide teaches",
+  "semantic_type": "comparison|sequence|definition|list|mixed",
+  "content": [
+    // For COMPARISON (side-by-side groups):
+    {
+      "type": "comparison",
+      "description": "what is being compared",
+      "groups": [
+        { "label": "Group 1 name", "visual_cue": "what marks this group", "items": ["item 1", "item 2"] },
+        { "label": "Group 2 name", "visual_cue": "what marks this group", "items": ["item 1", "item 2"] }
+      ]
+    },
+    // For SEQUENCE (ordered steps):
+    {
+      "type": "sequence",
+      "description": "what process this shows",
+      "steps": [
+        { "step": 1, "text": "First step" },
+        { "step": 2, "text": "Second step" }
+      ]
+    },
+    // For DEFINITION:
+    { "type": "definition", "term": "word", "definition": "meaning", "examples": ["ex1"] },
+    // For simple LIST:
+    { "type": "list", "items": ["item 1", "item 2"] },
+    // For HEADING:
+    { "type": "heading", "text": "Section title", "level": 1 },
+    // For PARAGRAPH:
+    { "type": "paragraph", "text": "Body text content" }
+  ]
+}
+
+CRITICAL: Preserve ALL text from the slide in the original language. Do not translate.
+Keep responses concise - focus on the actual slide content, not lengthy descriptions.
+`;
+
+/**
+ * Extract JSON from model response, handling markdown fences and edge cases.
+ */
+function extractJSON(text) {
+    let cleaned = text.trim();
+
+    // Remove markdown code fences if present
+    cleaned = cleaned.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+
+    // Try direct parse first
+    try {
+        return JSON.parse(cleaned);
+    } catch (e) {
+        console.log('[AI] Direct parse failed, trying regex extraction...');
+    }
+
+    // Extract JSON object with regex
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+        try {
+            return JSON.parse(match[0]);
+        } catch (e) {
+            console.log('[AI] Regex extraction failed:', e.message);
+        }
+    }
+
+    throw new Error('Could not parse response as JSON. The model may have returned invalid output. Try a different model.');
 }
 
 /**
@@ -83,4 +184,54 @@ async function fixWithScreenshot(screenshotBuffer, mimeType, currentJson, userKe
     return JSON.parse(text);
 }
 
-module.exports = { analyzeSlide, fixWithScreenshot };
+/**
+ * Convert a slide screenshot + raw extraction into semantic content.
+ * This is the core function for transforming visual slide layouts into meaningful structured content.
+ */
+async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL) {
+    const key = userKey || process.env.GEMINI_API_KEY;
+    if (!key) throw new Error("No Gemini API Key provided.");
+
+    const genAI = new GoogleGenerativeAI(key);
+    const selectedModel = AVAILABLE_MODELS[modelName] ? modelName : DEFAULT_MODEL;
+
+    console.log(`[AI] Semantic conversion with model: ${selectedModel}`);
+    console.log(`[AI] Image size: ${screenshotBuffer.length} bytes, type: ${mimeType}`);
+
+    // NO responseSchema - let the model generate freely to avoid truncation/hallucination issues
+    const model = genAI.getGenerativeModel({ model: selectedModel });
+
+    const prompt = SEMANTIC_PROMPT.replace('{{RAW_EXTRACTION}}',
+        JSON.stringify(rawExtraction.content || rawExtraction, null, 2));
+
+    console.log(`[AI] Prompt length: ${prompt.length} chars`);
+
+    const imagePart = {
+        inlineData: {
+            data: screenshotBuffer.toString("base64"),
+            mimeType
+        }
+    };
+
+    try {
+        console.log(`[AI] Sending request to Gemini API...`);
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        const text = response.text();
+        console.log(`[AI] Response received, length: ${text.length} chars`);
+
+        // Use lenient JSON extraction
+        return extractJSON(text);
+    } catch (error) {
+        console.error(`[AI] Gemini API error:`, error.message);
+        if (error.message?.includes('fetch failed')) {
+            throw new Error(`Network error calling Gemini API. Check your internet connection and API key.`);
+        }
+        if (error.status === 404) {
+            throw new Error(`Model "${selectedModel}" not found. Try a different model in Settings.`);
+        }
+        throw error;
+    }
+}
+
+module.exports = { analyzeSlide, fixWithScreenshot, semanticConvert, getAvailableModels };

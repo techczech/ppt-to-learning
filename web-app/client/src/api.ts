@@ -3,9 +3,28 @@ import axios from 'axios';
 const API_URL = '/api';
 
 // --- Types ---
-export interface LegacyFile {
+
+export interface Collection {
     id: string;
-    filename: string;
+    name: string;
+    description: string;
+    color: string;
+    createdAt: string;
+}
+
+export interface Folder {
+    id: string;
+    collectionId: string;
+    parentId: string | null;
+    name: string;
+    order: number;
+}
+
+export interface Tag {
+    id: string;
+    collectionId: string;
+    name: string;
+    color: string;
 }
 
 export interface ManagedPresentation {
@@ -15,11 +34,25 @@ export interface ManagedPresentation {
     uploadedAt: string;
     status: 'pending' | 'processing' | 'completed' | 'failed';
     resultId?: string;
+    // Extracted PPTX metadata
+    title?: string;
+    author?: string;
+    created?: string;
+    modified?: string;
+    stats?: { slide_count: number; image_count: number };
+    // Organization
+    collectionId?: string | null;
+    folderId?: string | null;
+    tagIds?: string[];
 }
 
 // --- BYOK and Prompt Management ---
 export const getStoredApiKey = () => localStorage.getItem('gemini_api_key') || '';
 export const setStoredApiKey = (key: string) => localStorage.setItem('gemini_api_key', key);
+
+// --- Model Selection ---
+export const getStoredModel = () => localStorage.getItem('gemini_model') || '';
+export const setStoredModel = (model: string) => localStorage.setItem('gemini_model', model);
 
 export const DEFAULT_PROMPTS = {
     analyze: `Analyze the following slide data from a learning module.
@@ -59,16 +92,85 @@ api.interceptors.request.use((config) => {
     if (key) {
         config.headers['x-gemini-key'] = key;
     }
+    const model = getStoredModel();
+    if (model) {
+        config.headers['x-gemini-model'] = model;
+    }
     return config;
 });
 
 // --- API Functions ---
 
-export const uploadFile = async (file: File) => {
+export interface UploadOptions {
+    generateScreenshots?: boolean;
+    collectionId?: string | null;
+    folderId?: string | null;
+}
+
+export const uploadFile = async (file: File, options?: UploadOptions) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (options?.generateScreenshots) {
+        formData.append('generateScreenshots', 'true');
+    }
+    if (options?.collectionId) {
+        formData.append('collectionId', options.collectionId);
+    }
+    if (options?.folderId) {
+        formData.append('folderId', options.folderId);
+    }
     const res = await api.post(`/upload`, formData);
     return res.data;
+};
+
+export type BatchUploadStatus = 'queued' | 'uploading' | 'processing' | 'completed' | 'failed';
+
+export interface BatchUploadProgress {
+    fileId: string;
+    filename: string;
+    status: BatchUploadStatus;
+    presentationId?: string;
+    error?: string;
+}
+
+export interface BatchUploadResult {
+    ids: string[];
+    filenames: string[];
+}
+
+/**
+ * Upload multiple files sequentially with progress callbacks
+ */
+export const uploadFiles = async (
+    files: File[],
+    options: UploadOptions,
+    onProgress?: (progress: BatchUploadProgress[]) => void
+): Promise<BatchUploadResult> => {
+    const result: BatchUploadResult = { ids: [], filenames: [] };
+    const progress: BatchUploadProgress[] = files.map((f, i) => ({
+        fileId: `file-${i}`,
+        filename: f.name,
+        status: 'queued' as BatchUploadStatus
+    }));
+
+    for (let i = 0; i < files.length; i++) {
+        progress[i].status = 'uploading';
+        onProgress?.([...progress]);
+
+        try {
+            const res = await uploadFile(files[i], options);
+            progress[i].status = 'processing';
+            progress[i].presentationId = res.id;
+            result.ids.push(res.id);
+            result.filenames.push(files[i].name);
+        } catch (e) {
+            progress[i].status = 'failed';
+            progress[i].error = e instanceof Error ? e.message : 'Upload failed';
+        }
+        onProgress?.([...progress]);
+    }
+
+    return result;
 };
 
 export const checkStatus = async (id: string) => {
@@ -91,22 +193,110 @@ export const reprocessPresentation = async (id: string) => {
     return res.data;
 };
 
+export const deletePresentation = async (id: string) => {
+    const res = await api.delete(`/presentations/${id}`);
+    return res.data;
+};
+
+export interface UpdatePresentationData {
+    originalName?: string;
+    collectionId?: string | null;
+    folderId?: string | null;
+    tagIds?: string[];
+}
+
+export const updatePresentation = async (id: string, data: UpdatePresentationData) => {
+    const res = await api.patch(`/presentations/${id}`, data);
+    return res.data;
+};
+
 export const getManagedPresentations = async (): Promise<ManagedPresentation[]> => {
     const res = await api.get(`/presentations`);
     return res.data;
 };
 
-export const getLegacyFiles = async (): Promise<LegacyFile[]> => {
-    const res = await api.get(`/legacy/list`);
+// --- Collections ---
+
+export const getCollections = async (): Promise<Collection[]> => {
+    const res = await api.get(`/collections`);
     return res.data;
 };
 
-export const getLegacyPresentation = async (id: string) => {
-    const res = await api.get(`/legacy/view/${id}`);
+export const createCollection = async (name: string, description?: string, color?: string): Promise<Collection> => {
+    const res = await api.post(`/collections`, { name, description, color });
+    return res.data;
+};
+
+export const updateCollection = async (id: string, data: { name?: string; description?: string; color?: string }): Promise<Collection> => {
+    const res = await api.patch(`/collections/${id}`, data);
+    return res.data;
+};
+
+export const deleteCollection = async (id: string) => {
+    const res = await api.delete(`/collections/${id}`);
+    return res.data;
+};
+
+// --- Folders ---
+
+export const getFolders = async (collectionId: string): Promise<Folder[]> => {
+    const res = await api.get(`/collections/${collectionId}/folders`);
+    return res.data;
+};
+
+export const createFolder = async (collectionId: string, name: string, parentId?: string | null): Promise<Folder> => {
+    const res = await api.post(`/collections/${collectionId}/folders`, { name, parentId });
+    return res.data;
+};
+
+export const updateFolder = async (id: string, data: { name?: string; parentId?: string | null; order?: number }): Promise<Folder> => {
+    const res = await api.patch(`/folders/${id}`, data);
+    return res.data;
+};
+
+export const deleteFolder = async (id: string) => {
+    const res = await api.delete(`/folders/${id}`);
+    return res.data;
+};
+
+// --- Tags ---
+
+export const getTags = async (collectionId: string): Promise<Tag[]> => {
+    const res = await api.get(`/collections/${collectionId}/tags`);
+    return res.data;
+};
+
+export const createTag = async (collectionId: string, name: string, color?: string): Promise<Tag> => {
+    const res = await api.post(`/collections/${collectionId}/tags`, { name, color });
+    return res.data;
+};
+
+export const updateTag = async (id: string, data: { name?: string; color?: string }): Promise<Tag> => {
+    const res = await api.patch(`/tags/${id}`, data);
+    return res.data;
+};
+
+export const deleteTag = async (id: string) => {
+    const res = await api.delete(`/tags/${id}`);
     return res.data;
 };
 
 // --- AI Functions ---
+
+export interface ModelInfo {
+    name: string;
+    description: string;
+}
+
+export interface ModelsResponse {
+    models: Record<string, ModelInfo>;
+    default: string;
+}
+
+export const getAvailableModels = async (): Promise<ModelsResponse> => {
+    const res = await api.get(`/ai/models`);
+    return res.data;
+};
 
 export const analyzeSlide = async (slide: any, prompt?: string) => {
     const res = await api.post(`/ai/analyze`, { slide, prompt });
@@ -122,11 +312,38 @@ export const fixWithScreenshot = async (screenshot: File, currentJson: any, prom
     return res.data;
 };
 
+// Semantic Conversion - Transform screenshot + raw extraction into semantic content
+export const semanticConvert = async (screenshot: File, rawExtraction: any) => {
+    const formData = new FormData();
+    formData.append('screenshot', screenshot);
+    formData.append('rawExtraction', JSON.stringify(rawExtraction));
+    const res = await api.post(`/ai/convert`, formData);
+    return res.data;
+};
+
+// --- Screenshot Functions ---
+
+export interface ScreenshotsStatus {
+    hasScreenshots: boolean;
+    count: number;
+    screenshots: string[];
+}
+
+export const getScreenshotsStatus = async (id: string): Promise<ScreenshotsStatus> => {
+    const res = await api.get(`/screenshots/${id}`);
+    return res.data;
+};
+
+export const generateScreenshots = async (id: string) => {
+    const res = await api.post(`/generate-screenshots/${id}`);
+    return res.data;
+};
+
+export const getScreenshotUrl = (id: string, slideNumber: number) => {
+    return `/media/${id}/screenshots/slide_${String(slideNumber).padStart(4, '0')}.png`;
+};
+
 // --- Utilities ---
 export const getMediaUrl = (conversionId: string, pathOrUrl: string) => {
-    if (conversionId === 'legacy') {
-        const cleanPath = pathOrUrl.startsWith('media/') ? pathOrUrl.substring(6) : pathOrUrl;
-        return `/legacy-media/${cleanPath}`;
-    }
     return `/media/${conversionId}/${pathOrUrl}`;
 };

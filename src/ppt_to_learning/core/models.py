@@ -31,14 +31,18 @@ class ParagraphBlock(ContentBlock):
 class ListItem:
     text: str
     level: int = 0
+    url: Optional[str] = None
     children: List['ListItem'] = field(default_factory=list)
-    
+
     def to_dict(self):
-        return {
+        result = {
             "text": self.text,
             "level": self.level,
             "children": [c.to_dict() for c in self.children]
         }
+        if self.url:
+            result["url"] = self.url
+        return result
 
 @dataclass
 class ListBlock(ContentBlock):
@@ -59,9 +63,27 @@ class ImageBlock(ContentBlock):
     alt: str = ""
     caption: str = ""
     type: str = "image"
-    
+
     def to_dict(self):
         return {"type": "image", "src": self.src, "alt": self.alt, "caption": self.caption}
+
+@dataclass
+class LinkBlock(ContentBlock):
+    text: str = ""
+    url: str = ""
+    type: str = "link"
+
+    def to_dict(self):
+        return {"type": "link", "text": self.text, "url": self.url}
+
+@dataclass
+class VideoBlock(ContentBlock):
+    src: str = ""
+    title: str = ""
+    type: str = "video"
+
+    def to_dict(self):
+        return {"type": "video", "src": self.src, "title": self.title}
 
 @dataclass
 class SmartArtNode:

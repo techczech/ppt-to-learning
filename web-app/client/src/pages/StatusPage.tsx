@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { checkStatus } from '../api';
-import { Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Loader2, XCircle } from 'lucide-react';
 
 export const StatusPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const [status, setStatus] = useState('processing');
     const [error, setError] = useState('');
 
     useEffect(() => {
