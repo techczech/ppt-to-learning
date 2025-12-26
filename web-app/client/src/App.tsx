@@ -15,7 +15,7 @@ import {
     getTags,
     type ManagedPresentation, type Collection, type Folder, type Tag
 } from './api';
-import { ApiKeyModal } from './components/ApiKeyModal';
+import { SettingsModal } from './components/SettingsModal';
 
 function App() {
     return (
@@ -542,7 +542,7 @@ const Home: React.FC = () => {
             </div>
 
             {/* Modals */}
-            <ApiKeyModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
             <CollectionModal
                 isOpen={collectionModalOpen}
