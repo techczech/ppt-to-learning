@@ -5,7 +5,6 @@ import { SlideGrid } from './SlideCard';
 import {
     getPresentationSlides,
     promoteSlides,
-    type PresentationSlide,
     type PresentationSlidesResponse,
     type SlidePromoteData
 } from '../api';

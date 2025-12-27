@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const archiver = require('archiver');
 const db = require('../db');
 const { getDataPaths } = require('../config');
 const { runConversion, runScreenshotGeneration, ROOT_DIR, PYTHON_PATH } = require('../services/extraction');
@@ -162,20 +163,60 @@ router.delete('/presentations/:id', async (req, res) => {
     }
 });
 
+// Batch Update Presentations (for moving multiple)
+// NOTE: This route must come BEFORE /presentations/:id to avoid matching "batch" as an id
+router.patch('/presentations/batch', (req, res) => {
+    const { ids, updates } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'ids array required' });
+    }
+
+    const presentations = db.getPresentations();
+    const results = [];
+
+    for (const id of ids) {
+        const presentation = presentations.find(p => p.id === id);
+        if (presentation) {
+            const updateData = {
+                collectionId: updates.collectionId,
+                folderId: updates.folderId
+            };
+
+            // Handle tags based on preserveTags option
+            if (updates.preserveTags) {
+                // Keep existing tags
+                updateData.tagIds = presentation.tagIds || [];
+            } else {
+                // Clear tags when moving
+                updateData.tagIds = [];
+            }
+
+            db.updatePresentationOrganization(id, updateData);
+            results.push({ id, success: true });
+        } else {
+            results.push({ id, success: false, error: 'Not found' });
+        }
+    }
+
+    triggerGitSync('batch move presentations');
+    res.json({ results });
+});
+
 // Update Presentation Metadata
 router.patch('/presentations/:id', (req, res) => {
     const { id } = req.params;
     const presentation = db.getPresentations().find(p => p.id === id);
     if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
 
-    const { originalName, collectionId, folderId, tagIds } = req.body;
+    const { originalName, description, collectionId, folderId, tagIds } = req.body;
     if (originalName) {
         db.updateOriginalName(id, originalName);
     }
-    if (collectionId !== undefined || folderId !== undefined || tagIds !== undefined) {
-        db.updatePresentationOrganization(id, { collectionId, folderId, tagIds });
+    if (description !== undefined || collectionId !== undefined || folderId !== undefined || tagIds !== undefined) {
+        db.updatePresentationOrganization(id, { description, collectionId, folderId, tagIds });
     }
 
+    triggerGitSync('update presentation');
     res.json({ success: true, id });
 });
 
@@ -243,6 +284,55 @@ router.get('/presentations/:id/slides', (req, res) => {
         console.error(`Error reading presentation slides: ${e.message}`);
         res.status(500).json({ error: 'Failed to read presentation slides' });
     }
+});
+
+// Export Presentation as ZIP
+router.get('/presentations/:id/export', (req, res) => {
+    const { id } = req.params;
+    const presentation = db.getPresentations().find(p => p.id === id);
+    if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
+
+    const storageDir = path.join(getStorageDir(), id);
+    const jsonPath = path.join(storageDir, 'json', `${id}.json`);
+
+    if (!fs.existsSync(jsonPath)) {
+        return res.status(404).json({ error: 'Presentation data not found' });
+    }
+
+    // Sanitize filename for download
+    const safeName = presentation.originalName
+        .replace(/\.pptx?$/i, '')
+        .replace(/[^a-z0-9_\-\s]/gi, '')
+        .trim() || 'presentation';
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+
+    archive.on('error', (err) => {
+        console.error('Archive error:', err);
+        res.status(500).json({ error: 'Failed to create archive' });
+    });
+
+    archive.pipe(res);
+
+    // Add JSON file
+    archive.file(jsonPath, { name: 'presentation.json' });
+
+    // Add media directory if exists
+    const mediaDir = path.join(storageDir, 'media');
+    if (fs.existsSync(mediaDir)) {
+        archive.directory(mediaDir, 'media');
+    }
+
+    // Add screenshots if exist
+    const screenshotsDir = path.join(storageDir, 'screenshots');
+    if (fs.existsSync(screenshotsDir)) {
+        archive.directory(screenshotsDir, 'screenshots');
+    }
+
+    archive.finalize();
 });
 
 // View Presentation JSON

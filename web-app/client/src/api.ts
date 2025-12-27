@@ -40,6 +40,8 @@ export interface ManagedPresentation {
     created?: string;
     modified?: string;
     stats?: { slide_count: number; image_count: number };
+    // User-editable metadata
+    description?: string;
     // Organization
     collectionId?: string | null;
     folderId?: string | null;
@@ -200,6 +202,7 @@ export const deletePresentation = async (id: string) => {
 
 export interface UpdatePresentationData {
     originalName?: string;
+    description?: string;
     collectionId?: string | null;
     folderId?: string | null;
     tagIds?: string[];
@@ -207,6 +210,24 @@ export interface UpdatePresentationData {
 
 export const updatePresentation = async (id: string, data: UpdatePresentationData) => {
     const res = await api.patch(`/presentations/${id}`, data);
+    return res.data;
+};
+
+export interface BatchUpdateData {
+    collectionId?: string | null;
+    folderId?: string | null;
+    preserveTags?: boolean;
+}
+
+export interface BatchUpdateResult {
+    results: Array<{ id: string; success: boolean; error?: string }>;
+}
+
+export const batchUpdatePresentations = async (
+    ids: string[],
+    updates: BatchUpdateData
+): Promise<BatchUpdateResult> => {
+    const res = await api.patch(`/presentations/batch`, { ids, updates });
     return res.data;
 };
 

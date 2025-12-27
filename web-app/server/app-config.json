@@ -1,0 +1,11 @@
+{
+  "dataPath": "/Users/dominiklukes/gitrepos/my-ppt-repo",
+  "gitSync": {
+    "enabled": true,
+    "autoCommit": true,
+    "autoPush": true,
+    "commitMessage": "Auto-save: {action}",
+    "remote": "origin",
+    "branch": "main"
+  }
+}

@@ -3,6 +3,10 @@ const db = require('../db');
 
 const router = express.Router();
 
+// Git sync helper (will be set by main app)
+let triggerGitSync = async () => {};
+router.setGitSync = (fn) => { triggerGitSync = fn; };
+
 // --- COLLECTIONS ---
 
 router.get('/collections', (req, res) => {
@@ -13,6 +17,7 @@ router.post('/collections', (req, res) => {
     const { name, description, color } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
     const collection = db.addCollection(name, description, color);
+    triggerGitSync('create collection');
     res.json(collection);
 });
 
@@ -20,11 +25,13 @@ router.patch('/collections/:id', (req, res) => {
     const { name, description, color } = req.body;
     const collection = db.updateCollection(req.params.id, { name, description, color });
     if (!collection) return res.status(404).json({ error: 'Collection not found' });
+    triggerGitSync('update collection');
     res.json(collection);
 });
 
 router.delete('/collections/:id', (req, res) => {
     db.deleteCollection(req.params.id);
+    triggerGitSync('delete collection');
     res.json({ success: true });
 });
 
@@ -38,6 +45,7 @@ router.post('/collections/:collId/folders', (req, res) => {
     const { name, parentId } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
     const folder = db.addFolder(req.params.collId, name, parentId);
+    triggerGitSync('create folder');
     res.json(folder);
 });
 
@@ -45,11 +53,13 @@ router.patch('/folders/:id', (req, res) => {
     const { name, parentId, order } = req.body;
     const folder = db.updateFolder(req.params.id, { name, parentId, order });
     if (!folder) return res.status(404).json({ error: 'Folder not found' });
+    triggerGitSync('update folder');
     res.json(folder);
 });
 
 router.delete('/folders/:id', (req, res) => {
     db.deleteFolder(req.params.id);
+    triggerGitSync('delete folder');
     res.json({ success: true });
 });
 
@@ -63,6 +73,7 @@ router.post('/collections/:collId/tags', (req, res) => {
     const { name, color } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
     const tag = db.addTag(req.params.collId, name, color);
+    triggerGitSync('create tag');
     res.json(tag);
 });
 
@@ -70,11 +81,13 @@ router.patch('/tags/:id', (req, res) => {
     const { name, color } = req.body;
     const tag = db.updateTag(req.params.id, { name, color });
     if (!tag) return res.status(404).json({ error: 'Tag not found' });
+    triggerGitSync('update tag');
     res.json(tag);
 });
 
 router.delete('/tags/:id', (req, res) => {
     db.deleteTag(req.params.id);
+    triggerGitSync('delete tag');
     res.json({ success: true });
 });
 

@@ -12,7 +12,7 @@ import {
     ChevronLeft, ChevronRight, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
     Eye, EyeOff, Grid, Maximize2, Search, ExternalLink, CheckSquare,
-    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library
+    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download
 } from 'lucide-react';
 import clsx from 'clsx';
 import SlidePromotionModal from '../components/SlidePromotionModal';
@@ -934,6 +934,13 @@ export const ViewerPage: React.FC = () => {
                             {showThumbnail ? <Eye className="w-5 h-5"/> : <EyeOff className="w-5 h-5"/>}
                         </button>
                         <button onClick={() => setViewMode(viewMode === 'slides' ? 'json' : 'slides')} className="p-2 hover:bg-gray-100 rounded-full" title="JSON view"><Code className="w-5 h-5"/></button>
+                        <a
+                            href={`/api/presentations/${id}/export`}
+                            className="p-2 hover:bg-green-100 text-gray-600 hover:text-green-700 rounded-full"
+                            title="Export as ZIP"
+                        >
+                            <Download className="w-5 h-5"/>
+                        </a>
 
                         <div className="h-6 w-px bg-gray-200" />
 

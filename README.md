@@ -23,6 +23,9 @@ Transform PowerPoint presentations into interactive, semantic web-based learning
 - **Search**: Search within presentations (press `/`) and across library
 - **Collections**: Organize presentations into projects with nested folders
 - **YouTube Embeds**: Automatically detect and embed YouTube videos from PPTX links
+- **ZIP Export**: Download presentations with all media files for external use
+- **Batch Operations**: Move multiple presentations between collections/folders
+- **Inline Editing**: Edit presentation metadata (name, description, tags) directly in the library
 
 ## Screenshots
 
@@ -235,7 +238,9 @@ ppt-to-learning/
 |--------|----------|-------------|
 | GET | `/api/presentations` | List all presentations |
 | POST | `/api/upload` | Upload PPTX file |
+| GET | `/api/presentations/:id/export` | Download presentation as ZIP |
 | GET | `/api/presentations/:id/json/:resultId` | Get presentation JSON |
+| PATCH | `/api/presentations/batch` | Batch update presentations |
 | POST | `/api/ai/semantic-convert` | AI semantic conversion |
 | GET | `/api/collections` | List collections |
 | POST | `/api/collections` | Create collection |
@@ -277,6 +282,17 @@ Screenshots require LibreOffice and Poppler. If not installed, the app will stil
 - Check your Gemini API key in Settings
 - Verify you have API quota remaining
 - Try a different model in Settings
+
+## Changelog
+
+### v0.2 (2025-12-27)
+- **ZIP Export**: Export presentations with all media files as downloadable ZIP
+- **Library Management**: Batch move presentations, inline metadata editing
+- **AI Icon Preservation**: Gemini semantic conversion now preserves icons/images from slides
+- **Improved UI**: Selection mode, expandable presentation cards, destination picker
+
+### v0.1 (2025-12-26)
+- Initial release with PPTX extraction, web viewer, and AI enhancement
 
 ## Contributing
 

@@ -6,6 +6,10 @@ const { getDataPaths } = require('../config');
 
 const router = express.Router();
 
+// Git sync helper (will be set by main app)
+let triggerGitSync = async () => {};
+router.setGitSync = (fn) => { triggerGitSync = fn; };
+
 // Helper: Get slide content from source presentation JSON
 const getSlideContentFromSource = (sourceId, slideOrder) => {
     const storagePath = getDataPaths().storagePath;
@@ -142,6 +146,7 @@ router.put('/slides/:id/content', (req, res) => {
     try {
         fs.writeFileSync(slidePath, JSON.stringify(req.body, null, 2));
         const updatedSlide = db.updateSlide(slide.id, { contentPath });
+        triggerGitSync('save slide content');
         res.json(updatedSlide);
     } catch (e) {
         console.error(`Error saving slide content: ${e.message}`);
@@ -166,6 +171,7 @@ router.patch('/slides/:id', (req, res) => {
     if (metadata !== undefined) updates.metadata = metadata;
 
     const updatedSlide = db.updateSlide(slide.id, updates);
+    triggerGitSync('update slide');
     res.json(updatedSlide);
 });
 
@@ -189,6 +195,7 @@ router.delete('/slides/:id', (req, res) => {
     }
 
     db.deleteSlide(slide.id);
+    triggerGitSync('delete slide');
     res.json({ success: true, id: slide.id });
 });
 
@@ -216,6 +223,7 @@ router.post('/slides/promote', (req, res) => {
         screenshotUrl: getScreenshotUrl(slide.sourceId, slide.sourceSlideOrder)
     }));
 
+    triggerGitSync('promote slides');
     res.json(enrichedSlides);
 });
 
@@ -239,6 +247,7 @@ router.post('/slides/:id/demote', (req, res) => {
     }
 
     db.demoteSlide(slide.id);
+    triggerGitSync('demote slide');
     res.json({ success: true, id: slide.id });
 });
 
@@ -251,6 +260,7 @@ router.post('/slides/bulk-tag', (req, res) => {
     }
 
     db.bulkTagSlides(slideIds, tagId, action);
+    triggerGitSync('bulk tag slides');
     res.json({ success: true });
 });
 

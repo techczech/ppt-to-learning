@@ -112,14 +112,15 @@ const updateOriginalName = (id, originalName) => {
     }
 };
 
-// Update presentation with collection/folder/tags
-const updatePresentationOrganization = (id, { collectionId, folderId, tagIds }) => {
+// Update presentation with collection/folder/tags/description
+const updatePresentationOrganization = (id, { collectionId, folderId, tagIds, description }) => {
     const db = readDB();
     const idx = db.presentations.findIndex(p => p.id === id);
     if (idx !== -1) {
         if (collectionId !== undefined) db.presentations[idx].collectionId = collectionId;
         if (folderId !== undefined) db.presentations[idx].folderId = folderId;
         if (tagIds !== undefined) db.presentations[idx].tagIds = tagIds;
+        if (description !== undefined) db.presentations[idx].description = description;
         writeDB(db);
         return db.presentations[idx];
     }

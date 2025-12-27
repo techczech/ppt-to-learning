@@ -8,14 +8,16 @@ import SlideLibrary from './pages/SlideLibrary';
 import { CollectionSidebar } from './components/CollectionSidebar';
 import { CollectionModal, FolderModal } from './components/CollectionModal';
 import { TagFilter, TagListDisplay } from './components/TagPills';
-import { BookOpen, FileText, RefreshCw, Clock, Settings, Trash2, Pencil, Check, X, Search, Library } from 'lucide-react';
+import { BookOpen, FileText, RefreshCw, Clock, Settings, Trash2, Pencil, Check, X, Search, Library, CheckSquare, Square, FolderInput, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import {
     getManagedPresentations, reprocessPresentation, deletePresentation, updatePresentation,
     getCollections, createCollection, updateCollection as apiUpdateCollection, deleteCollection as apiDeleteCollection,
     getFolders, createFolder, updateFolder as apiUpdateFolder, deleteFolder as apiDeleteFolder,
-    getTags,
+    getTags, batchUpdatePresentations,
     type ManagedPresentation, type Collection, type Folder, type Tag
 } from './api';
+import { MoveModal } from './components/MoveModal';
+import { InlineText, InlineDropdown, InlineTagEditor } from './components/InlineEdit';
 import { SettingsModal } from './components/SettingsModal';
 
 function App() {
@@ -57,8 +59,35 @@ const Home: React.FC = () => {
     const [folderModalParentId, setFolderModalParentId] = useState<string | null>(null);
     const [folderModalCollectionId, setFolderModalCollectionId] = useState<string | null>(null);
     const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
+    const [moveModalOpen, setMoveModalOpen] = useState(false);
+
+    // Multi-select state
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedPresentationIds, setSelectedPresentationIds] = useState<Set<string>>(new Set());
+
+    // Expanded card state
+    const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
 
     const navigate = useNavigate();
+
+    // Selection handlers
+    const togglePresentationSelection = (id: string) => {
+        setSelectedPresentationIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const selectAllVisible = () => {
+        setSelectedPresentationIds(new Set(filteredFiles.map(f => f.id)));
+    };
+
+    const clearSelection = () => {
+        setSelectedPresentationIds(new Set());
+        setSelectionMode(false);
+    };
 
     // Filter presentations
     const filteredFiles = managedFiles.filter(file => {
@@ -290,16 +319,28 @@ const Home: React.FC = () => {
         );
     };
 
-    const handleMoveToCollection = async (presentationId: string, collectionId: string | null) => {
+    const handleBatchMove = async (collectionId: string | null, folderId: string | null, preserveTags: boolean) => {
         try {
-            await updatePresentation(presentationId, { collectionId, folderId: null, tagIds: [] });
-            setManagedFiles(files => files.map(f =>
-                f.id === presentationId
-                    ? { ...f, collectionId, folderId: null, tagIds: [] }
-                    : f
-            ));
+            await batchUpdatePresentations(
+                Array.from(selectedPresentationIds),
+                { collectionId, folderId, preserveTags }
+            );
+            // Update local state
+            setManagedFiles(files => files.map(f => {
+                if (selectedPresentationIds.has(f.id)) {
+                    return {
+                        ...f,
+                        collectionId,
+                        folderId,
+                        tagIds: preserveTags ? f.tagIds : []
+                    };
+                }
+                return f;
+            }));
+            clearSelection();
         } catch (e) {
-            alert('Failed to move presentation');
+            alert('Failed to move presentations');
+            throw e;
         }
     };
 
@@ -417,6 +458,72 @@ const Home: React.FC = () => {
                                 </div>
                             </div>
 
+                            {/* Selection Mode Toolbar */}
+                            <div className="mb-4 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <button
+                                        onClick={() => {
+                                            if (selectionMode) {
+                                                clearSelection();
+                                            } else {
+                                                setSelectionMode(true);
+                                            }
+                                        }}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                                            selectionMode
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <CheckSquare className="w-4 h-4" />
+                                        {selectionMode ? 'Cancel' : 'Select'}
+                                    </button>
+
+                                    {selectionMode && (
+                                        <>
+                                            <span className="text-sm text-gray-500">
+                                                {selectedPresentationIds.size} selected
+                                            </span>
+                                            <button
+                                                onClick={selectAllVisible}
+                                                className="text-sm text-blue-600 hover:underline"
+                                            >
+                                                Select all
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Batch actions */}
+                                {selectionMode && selectedPresentationIds.size > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setMoveModalOpen(true)}
+                                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+                                        >
+                                            <FolderInput className="w-4 h-4" />
+                                            Move ({selectedPresentationIds.size})
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                const count = selectedPresentationIds.size;
+                                                if (confirm(`Delete ${count} presentation${count > 1 ? 's' : ''}? This cannot be undone.`)) {
+                                                    for (const id of selectedPresentationIds) {
+                                                        await deletePresentation(id);
+                                                    }
+                                                    setManagedFiles(files => files.filter(f => !selectedPresentationIds.has(f.id)));
+                                                    clearSelection();
+                                                }
+                                            }}
+                                            className="flex items-center gap-1 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-sm transition-colors"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                            Delete
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
                             {/* Tag filter */}
                             {currentTags.length > 0 && (
                                 <div className="mb-4">
@@ -440,84 +547,131 @@ const Home: React.FC = () => {
                                 ) : (
                                     <ul className="divide-y divide-gray-100">
                                         {filteredFiles.map((file) => (
-                                            <li key={file.id} className="p-4 hover:bg-gray-50 transition flex items-center justify-between group">
-                                                <Link
-                                                    to={file.status === 'completed' ? `/viewer/new/${file.id}/${file.resultId}` : `/status/${file.id}`}
-                                                    className="flex items-center flex-1 min-w-0"
-                                                    onClick={(e) => editingId === file.id && e.preventDefault()}
-                                                >
-                                                    <div className={`p-2 rounded mr-3 flex-shrink-0 ${file.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                                                        {file.status === 'completed' ? <FileText className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        {editingId === file.id ? (
-                                                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                                                                <input
-                                                                    type="text"
-                                                                    value={editName}
-                                                                    onChange={(e) => setEditName(e.target.value)}
-                                                                    className="flex-1 px-2 py-1 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                                    autoFocus
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter') saveEdit(file.id, e as any);
-                                                                        if (e.key === 'Escape') cancelEdit(e as any);
-                                                                    }}
-                                                                />
-                                                                <button onClick={(e) => saveEdit(file.id, e)} className="p-1 text-green-600 hover:bg-green-50 rounded">
-                                                                    <Check className="w-4 h-4" />
-                                                                </button>
-                                                                <button onClick={cancelEdit} className="p-1 text-gray-400 hover:bg-gray-100 rounded">
-                                                                    <X className="w-4 h-4" />
-                                                                </button>
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <h3 className="font-medium text-gray-800 group-hover:text-blue-600 transition-colors truncate">
-                                                                    {file.originalName.replace(/\.(pptx?|PPTX?)$/, '')}
-                                                                </h3>
-                                                                <div className="flex items-center text-xs text-gray-400 space-x-2 flex-wrap mt-0.5">
-                                                                    {file.author && (
-                                                                        <>
-                                                                            <span className="text-gray-500">{file.author}</span>
-                                                                            <span>•</span>
-                                                                        </>
-                                                                    )}
-                                                                    {file.stats?.slide_count && (
-                                                                        <>
-                                                                            <span>{file.stats.slide_count} slides</span>
-                                                                            <span>•</span>
-                                                                        </>
-                                                                    )}
-                                                                    <span className="capitalize">{file.status}</span>
-                                                                </div>
-                                                                {file.tagIds && file.tagIds.length > 0 && (
-                                                                    <div className="mt-1">
-                                                                        <TagListDisplay tags={tags} tagIds={file.tagIds} />
-                                                                    </div>
-                                                                )}
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </Link>
-                                                <div className="ml-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                                    {/* Move to collection */}
-                                                    {collections.length > 0 && !file.collectionId && (
-                                                        <select
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            onChange={(e) => {
-                                                                if (e.target.value) {
-                                                                    handleMoveToCollection(file.id, e.target.value);
-                                                                }
-                                                            }}
-                                                            className="text-xs border border-gray-200 rounded px-1 py-1 mr-1"
-                                                            defaultValue=""
+                                            <li
+                                                key={file.id}
+                                                className={`p-4 hover:bg-gray-50 transition group ${
+                                                    selectedPresentationIds.has(file.id) ? 'bg-blue-50 ring-2 ring-inset ring-blue-500' : ''
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between">
+                                                    {/* Checkbox in selection mode */}
+                                                    {selectionMode && (
+                                                        <button
+                                                            onClick={() => togglePresentationSelection(file.id)}
+                                                            className="mr-3 flex-shrink-0 text-gray-400 hover:text-blue-600"
                                                         >
-                                                            <option value="" disabled>Move to...</option>
-                                                            {collections.map(c => (
-                                                                <option key={c.id} value={c.id}>{c.name}</option>
-                                                            ))}
-                                                        </select>
+                                                            {selectedPresentationIds.has(file.id) ? (
+                                                                <CheckSquare className="w-5 h-5 text-blue-600" />
+                                                            ) : (
+                                                                <Square className="w-5 h-5" />
+                                                            )}
+                                                        </button>
                                                     )}
+
+                                                    <Link
+                                                        to={file.status === 'completed' ? `/viewer/new/${file.id}/${file.resultId}` : `/status/${file.id}`}
+                                                        className="flex items-center flex-1 min-w-0"
+                                                        onClick={(e) => {
+                                                            if (editingId === file.id) {
+                                                                e.preventDefault();
+                                                            } else if (selectionMode) {
+                                                                e.preventDefault();
+                                                                togglePresentationSelection(file.id);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <div className={`p-2 rounded mr-3 flex-shrink-0 ${file.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                                                            {file.status === 'completed' ? <FileText className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            {editingId === file.id ? (
+                                                                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={editName}
+                                                                        onChange={(e) => setEditName(e.target.value)}
+                                                                        className="flex-1 px-2 py-1 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                                        autoFocus
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') saveEdit(file.id, e as any);
+                                                                            if (e.key === 'Escape') cancelEdit(e as any);
+                                                                        }}
+                                                                    />
+                                                                    <button onClick={(e) => saveEdit(file.id, e)} className="p-1 text-green-600 hover:bg-green-50 rounded">
+                                                                        <Check className="w-4 h-4" />
+                                                                    </button>
+                                                                    <button onClick={cancelEdit} className="p-1 text-gray-400 hover:bg-gray-100 rounded">
+                                                                        <X className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <h3 className="font-medium text-gray-800 group-hover:text-blue-600 transition-colors truncate">
+                                                                        {file.originalName.replace(/\.(pptx?|PPTX?)$/, '')}
+                                                                    </h3>
+                                                                    <div className="flex items-center text-xs text-gray-400 space-x-2 flex-wrap mt-0.5">
+                                                                        {file.author && (
+                                                                            <>
+                                                                                <span className="text-gray-500">{file.author}</span>
+                                                                                <span>•</span>
+                                                                            </>
+                                                                        )}
+                                                                        {file.stats?.slide_count && (
+                                                                            <>
+                                                                                <span>{file.stats.slide_count} slides</span>
+                                                                                <span>•</span>
+                                                                            </>
+                                                                        )}
+                                                                        <span className="capitalize">{file.status}</span>
+                                                                        {file.collectionId && (
+                                                                            <>
+                                                                                <span>•</span>
+                                                                                <span
+                                                                                    className="inline-flex items-center gap-1"
+                                                                                    style={{ color: collections.find(c => c.id === file.collectionId)?.color }}
+                                                                                >
+                                                                                    {collections.find(c => c.id === file.collectionId)?.name}
+                                                                                    {file.folderId && folders.find(f => f.id === file.folderId) && (
+                                                                                        <span className="text-gray-400">
+                                                                                            / {folders.find(f => f.id === file.folderId)?.name}
+                                                                                        </span>
+                                                                                    )}
+                                                                                </span>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                    {file.tagIds && file.tagIds.length > 0 && (
+                                                                        <div className="mt-1">
+                                                                            <TagListDisplay tags={tags} tagIds={file.tagIds} />
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </Link>
+                                                    <div className={`ml-3 flex items-center gap-1 flex-shrink-0 ${selectionMode ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                                                        {/* Move button - always available */}
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                setSelectedPresentationIds(new Set([file.id]));
+                                                                setMoveModalOpen(true);
+                                                            }}
+                                                            title="Move to..."
+                                                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition"
+                                                        >
+                                                            <FolderInput className="w-4 h-4" />
+                                                        </button>
+                                                        {/* Export as ZIP */}
+                                                        <a
+                                                            href={`/api/presentations/${file.id}/export`}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            title="Export as ZIP"
+                                                            className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-full transition"
+                                                        >
+                                                            <Download className="w-4 h-4" />
+                                                        </a>
                                                     <button
                                                         onClick={(e) => startEdit(file, e)}
                                                         title="Rename"
@@ -539,7 +693,104 @@ const Home: React.FC = () => {
                                                     >
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            setExpandedCardId(expandedCardId === file.id ? null : file.id);
+                                                        }}
+                                                        title={expandedCardId === file.id ? "Collapse" : "Expand"}
+                                                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition"
+                                                    >
+                                                        {expandedCardId === file.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                    </button>
                                                 </div>
+                                                </div>
+
+                                                {/* Expanded metadata section */}
+                                                {expandedCardId === file.id && (
+                                                    <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
+                                                        {/* Description */}
+                                                        <div>
+                                                            <label className="text-xs text-gray-500 mb-1 block font-medium">Description</label>
+                                                            <InlineText
+                                                                value={file.description || ''}
+                                                                placeholder="Add a description..."
+                                                                multiline
+                                                                onSave={async (value) => {
+                                                                    await updatePresentation(file.id, { description: value });
+                                                                    setManagedFiles(files => files.map(f =>
+                                                                        f.id === file.id ? { ...f, description: value } : f
+                                                                    ));
+                                                                }}
+                                                            />
+                                                        </div>
+
+                                                        {/* Collection */}
+                                                        <div>
+                                                            <label className="text-xs text-gray-500 mb-1 block font-medium">Collection</label>
+                                                            <InlineDropdown
+                                                                value={file.collectionId || null}
+                                                                options={collections.map(c => ({
+                                                                    value: c.id,
+                                                                    label: c.name,
+                                                                    color: c.color
+                                                                }))}
+                                                                placeholder="No collection"
+                                                                allowNull
+                                                                nullLabel="Remove from collection"
+                                                                onSave={async (collId) => {
+                                                                    await updatePresentation(file.id, {
+                                                                        collectionId: collId,
+                                                                        folderId: null // Clear folder when changing collection
+                                                                    });
+                                                                    setManagedFiles(files => files.map(f =>
+                                                                        f.id === file.id ? { ...f, collectionId: collId, folderId: null } : f
+                                                                    ));
+                                                                }}
+                                                            />
+                                                        </div>
+
+                                                        {/* Folder (only if in a collection) */}
+                                                        {file.collectionId && (
+                                                            <div>
+                                                                <label className="text-xs text-gray-500 mb-1 block font-medium">Folder</label>
+                                                                <InlineDropdown
+                                                                    value={file.folderId || null}
+                                                                    options={folders
+                                                                        .filter(f => f.collectionId === file.collectionId)
+                                                                        .map(f => ({ value: f.id, label: f.name }))}
+                                                                    placeholder="No folder"
+                                                                    allowNull
+                                                                    nullLabel="Move to collection root"
+                                                                    onSave={async (folderId) => {
+                                                                        await updatePresentation(file.id, { folderId });
+                                                                        setManagedFiles(files => files.map(f =>
+                                                                            f.id === file.id ? { ...f, folderId } : f
+                                                                        ));
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        )}
+
+                                                        {/* Tags */}
+                                                        <div>
+                                                            <label className="text-xs text-gray-500 mb-1 block font-medium">Tags</label>
+                                                            <InlineTagEditor
+                                                                selectedTagIds={file.tagIds || []}
+                                                                availableTags={tags.filter(t =>
+                                                                    !file.collectionId || t.collectionId === file.collectionId
+                                                                )}
+                                                                onSave={async (tagIds) => {
+                                                                    await updatePresentation(file.id, { tagIds });
+                                                                    setManagedFiles(files => files.map(f =>
+                                                                        f.id === file.id ? { ...f, tagIds } : f
+                                                                    ));
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </li>
                                         ))}
                                     </ul>
@@ -568,6 +819,20 @@ const Home: React.FC = () => {
                 }}
                 onSave={handleSaveFolder}
                 folder={editingFolder}
+            />
+
+            <MoveModal
+                isOpen={moveModalOpen}
+                onClose={() => {
+                    setMoveModalOpen(false);
+                    if (!selectionMode) {
+                        setSelectedPresentationIds(new Set());
+                    }
+                }}
+                onMove={handleBatchMove}
+                presentationCount={selectedPresentationIds.size}
+                collections={collections}
+                folders={folders}
             />
         </div>
     );

@@ -43,8 +43,10 @@ async function triggerGitSync(action) {
     }
 }
 
-// Pass git sync to presentations router
+// Pass git sync to routers
 presentationsRouter.setGitSync(triggerGitSync);
+collectionsRouter.setGitSync(triggerGitSync);
+slidesRouter.setGitSync(triggerGitSync);
 
 // Mount routes
 app.use('/api', presentationsRouter);

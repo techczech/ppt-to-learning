@@ -9,7 +9,6 @@ import {
     Loader2,
     RefreshCw,
     ArrowLeft,
-    X,
     Layers
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -22,8 +21,7 @@ import {
     getManagedPresentations,
     type Slide,
     type Tag as TagType,
-    type ManagedPresentation,
-    type SlideFilters
+    type ManagedPresentation
 } from '../api';
 
 const SlideLibrary: React.FC = () => {

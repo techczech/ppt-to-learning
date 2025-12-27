@@ -28,6 +28,55 @@ function getAvailableModels() {
     return { models: AVAILABLE_MODELS, default: DEFAULT_MODEL };
 }
 
+/**
+ * Extract all images/icons from raw extraction content.
+ * Recursively collects images from nested structures like SmartArt.
+ */
+function extractImageList(rawExtraction) {
+    const images = [];
+    const content = rawExtraction.content || rawExtraction;
+
+    if (!Array.isArray(content)) return images;
+
+    function collectFromBlock(block) {
+        if (!block || typeof block !== 'object') return;
+
+        // Direct image blocks
+        if (block.type === 'image' && block.src) {
+            images.push({ src: block.src, alt: block.alt || 'Image' });
+        }
+
+        // SmartArt nodes may have icons
+        if (block.type === 'smart_art' && block.nodes) {
+            collectFromNodes(block.nodes);
+        }
+
+        // Check for nested content arrays
+        if (Array.isArray(block.content)) {
+            block.content.forEach(collectFromBlock);
+        }
+    }
+
+    function collectFromNodes(nodes) {
+        if (!Array.isArray(nodes)) return;
+        for (const node of nodes) {
+            if (node.icon) {
+                images.push({ src: node.icon, alt: node.text || 'Icon' });
+            }
+            if (node.image) {
+                images.push({ src: node.image, alt: node.text || 'Image' });
+            }
+            // Recurse into child nodes
+            if (node.children) {
+                collectFromNodes(node.children);
+            }
+        }
+    }
+
+    content.forEach(collectFromBlock);
+    return images;
+}
+
 // Simple prompt for semantic conversion - no schema constraint
 const SEMANTIC_PROMPT = `
 Analyze this slide screenshot and convert it to semantic learning content.
@@ -35,10 +84,20 @@ Analyze this slide screenshot and convert it to semantic learning content.
 Current extracted content (may be incomplete or in wrong order):
 {{RAW_EXTRACTION}}
 
+Available images/icons extracted from this slide:
+{{IMAGE_LIST}}
+
 TASK: Look at the VISUAL LAYOUT to understand how content is organized:
 - What groups exist? (identified by position, color, icons, visual containers)
 - What is the relationship between groups? (comparison, sequence, hierarchy)
 - What visual cues convey meaning? (cyclic icons = repetition, arrows = sequence, columns = comparison)
+
+IMAGES: If images/icons from the list above are semantically relevant:
+- Include them in the appropriate content blocks using the "icon" field
+- Use the exact "src" path from the image list
+- Icons can be added to: comparison groups, sequence steps, list items
+- Use "image" type for standalone images that need to be preserved
+- Only include images that add meaning - decorative images can be omitted
 
 OUTPUT: Return ONLY valid JSON (no markdown, no explanation) in this exact format:
 
@@ -47,32 +106,34 @@ OUTPUT: Return ONLY valid JSON (no markdown, no explanation) in this exact forma
   "summary": "one sentence describing what this slide teaches",
   "semantic_type": "comparison|sequence|definition|list|mixed",
   "content": [
-    // For COMPARISON (side-by-side groups):
+    // For COMPARISON (side-by-side groups with optional icons):
     {
       "type": "comparison",
       "description": "what is being compared",
       "groups": [
-        { "label": "Group 1 name", "visual_cue": "what marks this group", "items": ["item 1", "item 2"] },
+        { "label": "Group 1 name", "icon": "path/to/icon.png", "visual_cue": "what marks this group", "items": ["item 1", "item 2"] },
         { "label": "Group 2 name", "visual_cue": "what marks this group", "items": ["item 1", "item 2"] }
       ]
     },
-    // For SEQUENCE (ordered steps):
+    // For SEQUENCE (ordered steps with optional icons):
     {
       "type": "sequence",
       "description": "what process this shows",
       "steps": [
-        { "step": 1, "text": "First step" },
+        { "step": 1, "icon": "path/to/icon.png", "text": "First step" },
         { "step": 2, "text": "Second step" }
       ]
     },
     // For DEFINITION:
     { "type": "definition", "term": "word", "definition": "meaning", "examples": ["ex1"] },
-    // For simple LIST:
-    { "type": "list", "items": ["item 1", "item 2"] },
+    // For simple LIST (items can have icons):
+    { "type": "list", "items": [{ "text": "item 1", "icon": "path/to/icon.png" }, "item 2"] },
     // For HEADING:
     { "type": "heading", "text": "Section title", "level": 1 },
     // For PARAGRAPH:
-    { "type": "paragraph", "text": "Body text content" }
+    { "type": "paragraph", "text": "Body text content" },
+    // For standalone IMAGE:
+    { "type": "image", "src": "path/to/image.png", "alt": "Description", "placement": "inline" }
   ]
 }
 
@@ -201,8 +262,17 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
     // NO responseSchema - let the model generate freely to avoid truncation/hallucination issues
     const model = genAI.getGenerativeModel({ model: selectedModel });
 
-    const prompt = SEMANTIC_PROMPT.replace('{{RAW_EXTRACTION}}',
-        JSON.stringify(rawExtraction.content || rawExtraction, null, 2));
+    // Extract images/icons from raw extraction to inform the AI
+    const imageList = extractImageList(rawExtraction);
+    const imageListStr = imageList.length > 0
+        ? imageList.map(img => `- ${img.src} (${img.alt})`).join('\n')
+        : '(no images found)';
+
+    console.log(`[AI] Found ${imageList.length} images/icons in extraction`);
+
+    const prompt = SEMANTIC_PROMPT
+        .replace('{{RAW_EXTRACTION}}', JSON.stringify(rawExtraction.content || rawExtraction, null, 2))
+        .replace('{{IMAGE_LIST}}', imageListStr);
 
     console.log(`[AI] Prompt length: ${prompt.length} chars`);
 
