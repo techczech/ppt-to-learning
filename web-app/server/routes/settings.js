@@ -122,4 +122,37 @@ router.post('/settings/git-clone', async (req, res) => {
     }
 });
 
+// Restart server (uses shell to wait for port to be free, then starts new server)
+router.post('/settings/restart', (req, res) => {
+    const { exec } = require('child_process');
+    const path = require('path');
+
+    res.json({ success: true, message: 'Server restarting...' });
+
+    const serverDir = path.join(__dirname, '..');
+    const port = process.env.PORT || 3001;
+
+    // Use a shell command that:
+    // 1. Waits for the port to be free (old server died)
+    // 2. Then starts the new server
+    const restartScript = `
+        sleep 2
+        while lsof -i:${port} >/dev/null 2>&1; do sleep 0.5; done
+        cd "${serverDir}" && nohup node index.js > /tmp/ppt-server.log 2>&1 &
+    `;
+
+    // Spawn the restart script detached
+    const child = exec(`bash -c '${restartScript}'`, {
+        detached: true,
+        stdio: 'ignore'
+    });
+    child.unref();
+
+    // Exit after a brief delay to send the response
+    setTimeout(() => {
+        console.log('Server restart requested via API - exiting');
+        process.exit(0);
+    }, 500);
+});
+
 module.exports = router;

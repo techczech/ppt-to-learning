@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, X, CheckCircle, Terminal, Cpu, FolderGit2, GitBranch, RefreshCw, AlertCircle } from 'lucide-react';
+import { Save, X, CheckCircle, Terminal, Cpu, FolderGit2, GitBranch, RefreshCw, AlertCircle, Power } from 'lucide-react';
 import {
     getStoredApiKey, setStoredApiKey,
     getStoredPrompt, setStoredPrompt,
@@ -14,7 +14,8 @@ import {
     getGitStatus,
     initGitRepo,
     addGitRemote,
-    manualGitSync
+    manualGitSync,
+    restartServer
 } from '../api';
 import clsx from 'clsx';
 
@@ -44,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const [remoteUrl, setRemoteUrl] = useState('');
     const [syncing, setSyncing] = useState(false);
     const [syncMessage, setSyncMessage] = useState('');
+    const [restarting, setRestarting] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -152,6 +154,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         } finally {
             setSyncing(false);
         }
+    };
+
+    const handleRestartServer = async () => {
+        if (!confirm('Restart the backend server? The page will reload automatically.')) return;
+
+        setRestarting(true);
+        try {
+            await restartServer();
+        } catch (e) {
+            // Server might already be restarting, so errors are expected
+        }
+
+        // Poll until server is back up, then reload
+        const checkServer = async (attempts = 0): Promise<void> => {
+            if (attempts > 30) { // 30 attempts * 500ms = 15 seconds max wait
+                alert('Server did not restart in time. Please refresh manually.');
+                setRestarting(false);
+                return;
+            }
+            try {
+                const res = await fetch('/api/settings');
+                if (res.ok) {
+                    window.location.reload();
+                    return;
+                }
+            } catch {
+                // Server not ready yet
+            }
+            setTimeout(() => checkServer(attempts + 1), 500);
+        };
+
+        // Wait for old server to shut down and new one to start, then poll
+        setTimeout(() => checkServer(), 3000);
     };
 
     if (!isOpen) return null;
@@ -474,6 +509,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                         )}
                                     </div>
                                 )}
+                            </div>
+
+                            {/* Server Control */}
+                            <div className="pt-6 border-t border-gray-200">
+                                <h4 className="text-sm font-bold text-gray-800 mb-2 flex items-center">
+                                    <Power className="w-4 h-4 mr-2" />
+                                    Server Control
+                                </h4>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    Restart the backend server to apply configuration changes or reload routes.
+                                </p>
+                                <button
+                                    onClick={handleRestartServer}
+                                    disabled={restarting}
+                                    className={clsx(
+                                        "flex items-center px-4 py-3 rounded-xl text-sm font-bold transition-all",
+                                        restarting
+                                            ? "bg-orange-200 text-orange-600"
+                                            : "bg-orange-500 text-white hover:bg-orange-600"
+                                    )}
+                                >
+                                    <Power className={clsx("w-4 h-4 mr-2", restarting && "animate-pulse")} />
+                                    {restarting ? 'Restarting...' : 'Restart Server'}
+                                </button>
                             </div>
                         </div>
                     )}

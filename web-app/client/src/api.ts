@@ -312,6 +312,8 @@ export interface Slide {
     status: 'promoted';
     lastModified: string;
     contentPath: string | null;
+    collectionId: string | null;
+    folderId: string | null;
     tagIds: string[];
     starred: boolean;
     notes: string;
@@ -321,11 +323,21 @@ export interface Slide {
         contentTypes: string[];
         wordCount: number;
     };
+    searchableText?: {
+        title: string;
+        notes: string;
+        content: string;
+    } | null;
+    embedding?: number[] | null;
+    embeddingModel?: string | null;
     screenshotUrl?: string | null;
+    searchScore?: number;
 }
 
 export interface SlideFilters {
     sourceId?: string;
+    collectionId?: string;
+    folderId?: string;
     tagId?: string;
     starred?: boolean;
     search?: string;
@@ -365,11 +377,19 @@ export interface SlidePromoteData {
 export const getSlides = async (filters?: SlideFilters): Promise<Slide[]> => {
     const params = new URLSearchParams();
     if (filters?.sourceId) params.append('sourceId', filters.sourceId);
+    if (filters?.collectionId) params.append('collectionId', filters.collectionId);
+    if (filters?.folderId) params.append('folderId', filters.folderId);
     if (filters?.tagId) params.append('tagId', filters.tagId);
     if (filters?.starred !== undefined) params.append('starred', String(filters.starred));
     if (filters?.search) params.append('search', filters.search);
 
     const res = await api.get(`/slides?${params.toString()}`);
+    return res.data;
+};
+
+// Sync slide organization (backfill collectionId/folderId from presentations)
+export const syncSlideOrganization = async (): Promise<{ updated: number; total: number }> => {
+    const res = await api.post('/slides/sync-organization');
     return res.data;
 };
 
@@ -397,6 +417,8 @@ export const updateSlide = async (id: string, data: {
     tagIds?: string[];
     starred?: boolean;
     notes?: string;
+    collectionId?: string;
+    folderId?: string;
 }): Promise<Slide> => {
     const res = await api.patch(`/slides/${id}`, data);
     return res.data;
@@ -569,5 +591,201 @@ export const gitPush = async (): Promise<{ success: boolean; error?: string }> =
 
 export const cloneGitRepo = async (url: string, targetPath: string): Promise<{ success: boolean; error?: string }> => {
     const res = await api.post(`/settings/git-clone`, { url, path: targetPath });
+    return res.data;
+};
+
+export const restartServer = async (): Promise<{ success: boolean; message?: string }> => {
+    const res = await api.post(`/settings/restart`);
+    return res.data;
+};
+
+// --- Search ---
+
+export interface SearchResult {
+    results: Slide[];
+    total: number;
+}
+
+export interface SimilarSlide {
+    slide: Slide;
+    score: number;
+}
+
+export interface SimilaritySearchResult {
+    similar: SimilarSlide[];
+}
+
+// Full-text fuzzy search
+export const searchSlides = async (
+    query: string,
+    options?: { collectionId?: string; folderId?: string; limit?: number }
+): Promise<SearchResult> => {
+    const params = new URLSearchParams();
+    params.append('q', query);
+    if (options?.collectionId) params.append('collectionId', options.collectionId);
+    if (options?.folderId) params.append('folderId', options.folderId);
+    if (options?.limit) params.append('limit', String(options.limit));
+
+    const res = await api.get(`/search/slides?${params.toString()}`);
+    return res.data;
+};
+
+// Semantic similarity search (requires Gemini API key)
+export const findSimilarSlides = async (slideId: string, limit?: number): Promise<SimilaritySearchResult> => {
+    const res = await api.post('/search/similar', { slideId, limit: limit || 20 });
+    return res.data;
+};
+
+// Semantic search by text (requires Gemini API key)
+export const findSimilarByText = async (text: string, limit?: number): Promise<SimilaritySearchResult> => {
+    const res = await api.post('/search/similar', { text, limit: limit || 20 });
+    return res.data;
+};
+
+// Generate embeddings for slides (batch)
+export const generateEmbeddings = async (slideIds: string[]): Promise<{ updated: number; failed: { id: string; error: string }[] }> => {
+    const res = await api.post('/search/embeddings', { slideIds });
+    return res.data;
+};
+
+// --- Cart (localStorage) ---
+
+const CART_STORAGE_KEY = 'ppt_slide_cart';
+
+export const getCart = (): string[] => {
+    const stored = localStorage.getItem(CART_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+};
+
+export const addToCart = (slideId: string): string[] => {
+    const cart = getCart();
+    if (!cart.includes(slideId)) {
+        cart.push(slideId);
+        localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    }
+    return cart;
+};
+
+export const removeFromCart = (slideId: string): string[] => {
+    const cart = getCart().filter(id => id !== slideId);
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    return cart;
+};
+
+export const clearCart = (): void => {
+    localStorage.removeItem(CART_STORAGE_KEY);
+};
+
+export const isInCart = (slideId: string): boolean => {
+    return getCart().includes(slideId);
+};
+
+export const setCart = (slideIds: string[]): void => {
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(slideIds));
+};
+
+// --- Packs ---
+
+export interface Pack {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    slideIds: string[];
+    folderId: string | null;
+    createdAt: string;
+    lastModifiedAt: string;
+}
+
+export interface PackFolder {
+    id: string;
+    name: string;
+    color: string;
+    parentId: string | null;
+    createdAt: string;
+}
+
+export interface PackWithSlides {
+    pack: Pack;
+    slides: Slide[];
+}
+
+// List all packs
+export const getPacks = async (): Promise<Pack[]> => {
+    const res = await api.get('/packs');
+    return res.data;
+};
+
+// Get pack with slides
+export const getPackWithSlides = async (packId: string): Promise<PackWithSlides> => {
+    const res = await api.get(`/packs/${packId}`);
+    return res.data;
+};
+
+// Create pack
+export const createPack = async (
+    name: string,
+    slideIds: string[],
+    options?: { description?: string; color?: string; folderId?: string | null }
+): Promise<Pack> => {
+    const res = await api.post('/packs', { name, slideIds, ...options });
+    return res.data;
+};
+
+// Update pack
+export const updatePack = async (
+    packId: string,
+    updates: { name?: string; slideIds?: string[]; description?: string; color?: string; folderId?: string | null }
+): Promise<Pack> => {
+    const res = await api.patch(`/packs/${packId}`, updates);
+    return res.data;
+};
+
+// Delete pack
+export const deletePack = async (packId: string): Promise<{ success: boolean; id: string }> => {
+    const res = await api.delete(`/packs/${packId}`);
+    return res.data;
+};
+
+// Get pack export URL
+export const getPackExportUrl = (packId: string): string => {
+    return `/api/packs/${packId}/export`;
+};
+
+// --- Pack Folders ---
+
+// List all pack folders
+export const getPackFolders = async (): Promise<PackFolder[]> => {
+    const res = await api.get('/pack-folders');
+    return res.data;
+};
+
+// Get pack folder by ID
+export const getPackFolderById = async (id: string): Promise<PackFolder> => {
+    const res = await api.get(`/pack-folders/${id}`);
+    return res.data;
+};
+
+// Create pack folder
+export const createPackFolder = async (
+    name: string,
+    options?: { color?: string; parentId?: string | null }
+): Promise<PackFolder> => {
+    const res = await api.post('/pack-folders', { name, ...options });
+    return res.data;
+};
+
+// Update pack folder
+export const updatePackFolder = async (
+    id: string,
+    updates: { name?: string; color?: string; parentId?: string | null }
+): Promise<PackFolder> => {
+    const res = await api.patch(`/pack-folders/${id}`, updates);
+    return res.data;
+};
+
+// Delete pack folder
+export const deletePackFolder = async (id: string): Promise<{ success: boolean; id: string }> => {
+    const res = await api.delete(`/pack-folders/${id}`);
     return res.data;
 };

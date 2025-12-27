@@ -309,6 +309,16 @@ const getSlides = (filters = {}) => {
         slides = slides.filter(s => s.sourceId === filters.sourceId);
     }
 
+    // Filter by collectionId
+    if (filters.collectionId) {
+        slides = slides.filter(s => s.collectionId === filters.collectionId);
+    }
+
+    // Filter by folderId
+    if (filters.folderId) {
+        slides = slides.filter(s => s.folderId === filters.folderId);
+    }
+
     // Filter by tagId
     if (filters.tagId) {
         slides = slides.filter(s => s.tagIds && s.tagIds.includes(filters.tagId));
@@ -338,6 +348,12 @@ const getSlideById = (id) => {
 
 const addSlide = (sourceId, sourceSlideOrder, metadata = {}) => {
     const db = readDB();
+    // Inherit tags, collection, and folder from source presentation
+    const sourcePresentation = db.presentations.find(p => p.id === sourceId);
+    const inheritedTags = sourcePresentation?.tagIds || [];
+    const inheritedCollectionId = sourcePresentation?.collectionId || null;
+    const inheritedFolderId = sourcePresentation?.folderId || null;
+
     const newSlide = {
         id: uuid(),
         sourceId,
@@ -346,7 +362,9 @@ const addSlide = (sourceId, sourceSlideOrder, metadata = {}) => {
         status: 'promoted',
         lastModified: new Date().toISOString(),
         contentPath: null,  // null = use source JSON
-        tagIds: [],
+        collectionId: inheritedCollectionId,
+        folderId: inheritedFolderId,
+        tagIds: [...inheritedTags],
         starred: false,
         notes: '',
         metadata: {
@@ -371,6 +389,12 @@ const updateSlide = (id, updates) => {
         if (updates.starred !== undefined) slide.starred = updates.starred;
         if (updates.notes !== undefined) slide.notes = updates.notes;
         if (updates.contentPath !== undefined) slide.contentPath = updates.contentPath;
+        if (updates.collectionId !== undefined) slide.collectionId = updates.collectionId;
+        if (updates.folderId !== undefined) slide.folderId = updates.folderId;
+        if (updates.searchableText !== undefined) slide.searchableText = updates.searchableText;
+        if (updates.embedding !== undefined) slide.embedding = updates.embedding;
+        if (updates.embeddingModel !== undefined) slide.embeddingModel = updates.embeddingModel;
+        if (updates.embeddingGeneratedAt !== undefined) slide.embeddingGeneratedAt = updates.embeddingGeneratedAt;
         if (updates.metadata !== undefined) {
             slide.metadata = { ...slide.metadata, ...updates.metadata };
         }
@@ -405,6 +429,12 @@ const promoteBulkSlides = (sourceId, slidesData) => {
     const db = readDB();
     const results = [];
 
+    // Inherit tags, collection, and folder from source presentation
+    const sourcePresentation = db.presentations.find(p => p.id === sourceId);
+    const inheritedTags = sourcePresentation?.tagIds || [];
+    const inheritedCollectionId = sourcePresentation?.collectionId || null;
+    const inheritedFolderId = sourcePresentation?.folderId || null;
+
     for (const slideData of slidesData) {
         const { slideOrder, ...metadata } = slideData;
         // Check if already promoted
@@ -422,7 +452,9 @@ const promoteBulkSlides = (sourceId, slidesData) => {
                 status: 'promoted',
                 lastModified: new Date().toISOString(),
                 contentPath: null,
-                tagIds: [],
+                collectionId: inheritedCollectionId,
+                folderId: inheritedFolderId,
+                tagIds: [...inheritedTags],
                 starred: false,
                 notes: '',
                 metadata: {
@@ -464,6 +496,156 @@ const bulkTagSlides = (slideIds, tagId, action) => {
     writeDB(db);
 };
 
+// Sync organization for existing slides (migration)
+const syncSlideOrganization = () => {
+    const db = readDB();
+    let updated = 0;
+
+    db.slides.forEach(slide => {
+        const presentation = db.presentations.find(p => p.id === slide.sourceId);
+        if (presentation) {
+            const newCollectionId = presentation.collectionId || null;
+            const newFolderId = presentation.folderId || null;
+
+            if (slide.collectionId !== newCollectionId || slide.folderId !== newFolderId) {
+                slide.collectionId = newCollectionId;
+                slide.folderId = newFolderId;
+                slide.lastModified = new Date().toISOString();
+                updated++;
+            }
+        }
+    });
+
+    if (updated > 0) {
+        writeDB(db);
+    }
+    return { updated, total: db.slides.length };
+};
+
+// ==================== PACKS ====================
+
+const getPacks = () => {
+    const db = readDB();
+    // Ensure all packs have folderId for backwards compatibility
+    return (db.packs || []).map(p => ({ folderId: null, ...p }));
+};
+
+const getPackById = (id) => {
+    const db = readDB();
+    const pack = (db.packs || []).find(p => p.id === id);
+    // Ensure folderId exists for backwards compatibility
+    return pack ? { folderId: null, ...pack } : null;
+};
+
+const addPack = (name, slideIds = [], description = '', color = '#8B5CF6', folderId = null) => {
+    const db = readDB();
+    if (!db.packs) db.packs = [];
+
+    const newPack = {
+        id: uuid(),
+        name,
+        description,
+        color,
+        slideIds,
+        folderId,
+        createdAt: new Date().toISOString(),
+        lastModifiedAt: new Date().toISOString()
+    };
+
+    db.packs.push(newPack);
+    writeDB(db);
+    return newPack;
+};
+
+const updatePack = (id, updates) => {
+    const db = readDB();
+    if (!db.packs) return null;
+
+    const idx = db.packs.findIndex(p => p.id === id);
+    if (idx === -1) return null;
+
+    const pack = db.packs[idx];
+    if (updates.name !== undefined) pack.name = updates.name;
+    if (updates.description !== undefined) pack.description = updates.description;
+    if (updates.color !== undefined) pack.color = updates.color;
+    if (updates.slideIds !== undefined) pack.slideIds = updates.slideIds;
+    if (updates.folderId !== undefined) pack.folderId = updates.folderId || null;
+    pack.lastModifiedAt = new Date().toISOString();
+
+    writeDB(db);
+    return pack;
+};
+
+const deletePack = (id) => {
+    const db = readDB();
+    if (!db.packs) return;
+    db.packs = db.packs.filter(p => p.id !== id);
+    writeDB(db);
+};
+
+// ==================== PACK FOLDERS ====================
+
+const getPackFolders = () => {
+    const db = readDB();
+    return db.packFolders || [];
+};
+
+const getPackFolderById = (id) => {
+    const db = readDB();
+    return (db.packFolders || []).find(f => f.id === id) || null;
+};
+
+const addPackFolder = (name, color = '#6366F1', parentId = null) => {
+    const db = readDB();
+    if (!db.packFolders) db.packFolders = [];
+
+    const newFolder = {
+        id: uuid(),
+        name,
+        color,
+        parentId,
+        createdAt: new Date().toISOString()
+    };
+
+    db.packFolders.push(newFolder);
+    writeDB(db);
+    return newFolder;
+};
+
+const updatePackFolder = (id, updates) => {
+    const db = readDB();
+    if (!db.packFolders) return null;
+
+    const idx = db.packFolders.findIndex(f => f.id === id);
+    if (idx === -1) return null;
+
+    const folder = db.packFolders[idx];
+    if (updates.name !== undefined) folder.name = updates.name;
+    if (updates.color !== undefined) folder.color = updates.color;
+    if (updates.parentId !== undefined) folder.parentId = updates.parentId || null;
+
+    writeDB(db);
+    return folder;
+};
+
+const deletePackFolder = (id) => {
+    const db = readDB();
+    if (!db.packFolders) return;
+
+    // Remove the folder
+    db.packFolders = db.packFolders.filter(f => f.id !== id);
+
+    // Update packs that were in this folder to have no folder
+    if (db.packs) {
+        db.packs = db.packs.map(p => p.folderId === id ? { ...p, folderId: null } : p);
+    }
+
+    // Move child folders to root
+    db.packFolders = db.packFolders.map(f => f.parentId === id ? { ...f, parentId: null } : f);
+
+    writeDB(db);
+};
+
 module.exports = {
     // Presentations
     addPresentation,
@@ -497,5 +679,18 @@ module.exports = {
     promoteSlide,
     promoteBulkSlides,
     demoteSlide,
-    bulkTagSlides
+    bulkTagSlides,
+    syncSlideOrganization,
+    // Packs
+    getPacks,
+    getPackById,
+    addPack,
+    updatePack,
+    deletePack,
+    // Pack Folders
+    getPackFolders,
+    getPackFolderById,
+    addPackFolder,
+    updatePackFolder,
+    deletePackFolder
 };

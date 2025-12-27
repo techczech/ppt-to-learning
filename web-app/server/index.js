@@ -13,6 +13,8 @@ const collectionsRouter = require('./routes/collections');
 const aiRouter = require('./routes/ai');
 const settingsRouter = require('./routes/settings');
 const slidesRouter = require('./routes/slides');
+const searchRouter = require('./routes/search');
+const packsRouter = require('./routes/packs');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -47,6 +49,7 @@ async function triggerGitSync(action) {
 presentationsRouter.setGitSync(triggerGitSync);
 collectionsRouter.setGitSync(triggerGitSync);
 slidesRouter.setGitSync(triggerGitSync);
+packsRouter.setGitSync(triggerGitSync);
 
 // Mount routes
 app.use('/api', presentationsRouter);
@@ -54,6 +57,8 @@ app.use('/api', collectionsRouter);
 app.use('/api', aiRouter);
 app.use('/api', settingsRouter);
 app.use('/api', slidesRouter);
+app.use('/api', searchRouter);
+app.use('/api', packsRouter);
 
 // Root endpoint
 app.get('/', (req, res) => {

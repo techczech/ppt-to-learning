@@ -1,6 +1,33 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
+// Timeout in milliseconds for API calls (90 seconds)
+const API_TIMEOUT_MS = 90000;
+
+/**
+ * Wrap a promise with a timeout.
+ * @param {Promise} promise - The promise to wrap
+ * @param {number} ms - Timeout in milliseconds
+ * @param {string} operation - Description of the operation for error message
+ */
+function withTimeout(promise, ms, operation = 'API call') {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(`${operation} timed out after ${ms / 1000} seconds`));
+        }, ms);
+
+        promise
+            .then((result) => {
+                clearTimeout(timeoutId);
+                resolve(result);
+            })
+            .catch((error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            });
+    });
+}
+
 // Available Gemini models - updated December 2025
 // See: https://ai.google.dev/gemini-api/docs/models
 const AVAILABLE_MODELS = {
@@ -194,7 +221,11 @@ async function analyzeSlide(slideData, userKey, customPrompt) {
         finalPrompt = customPrompt.replace('{{SLIDE_DATA}}', JSON.stringify(slideData, null, 2));
     }
 
-    const result = await model.generateContent(finalPrompt);
+    const result = await withTimeout(
+        model.generateContent(finalPrompt),
+        API_TIMEOUT_MS,
+        'Slide analysis'
+    );
     const response = await result.response;
     return response.text();
 }
@@ -233,10 +264,14 @@ async function fixWithScreenshot(screenshotBuffer, mimeType, currentJson, userKe
         }
     };
 
-    const result = await model.generateContent([finalPrompt, imagePart]);
+    const result = await withTimeout(
+        model.generateContent([finalPrompt, imagePart]),
+        API_TIMEOUT_MS,
+        'Screenshot comparison'
+    );
     const response = await result.response;
     const text = response.text();
-    
+
     // Extract JSON block if LLM included markdown
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
@@ -284,8 +319,12 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
     };
 
     try {
-        console.log(`[AI] Sending request to Gemini API...`);
-        const result = await model.generateContent([prompt, imagePart]);
+        console.log(`[AI] Sending request to Gemini API (timeout: ${API_TIMEOUT_MS / 1000}s)...`);
+        const result = await withTimeout(
+            model.generateContent([prompt, imagePart]),
+            API_TIMEOUT_MS,
+            'Semantic conversion'
+        );
         const response = await result.response;
         const text = response.text();
         console.log(`[AI] Response received, length: ${text.length} chars`);

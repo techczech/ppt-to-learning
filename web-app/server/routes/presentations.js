@@ -45,13 +45,17 @@ router.post('/upload', upload.single('file'), (req, res) => {
     const collectionId = req.body.collectionId || null;
     const folderId = req.body.folderId || null;
 
-    db.addPresentation(id, req.file.filename, req.file.originalname, { collectionId, folderId });
+    // Normalize Unicode to NFC (composed form) to fix accented characters
+    // e.g., "jóga" might come as "jo\u0301ga" (decomposed) - normalize to "jóga" (composed)
+    const normalizedOriginalName = req.file.originalname.normalize('NFC');
+
+    db.addPresentation(id, req.file.filename, normalizedOriginalName, { collectionId, folderId });
     const outputDir = path.join(getStorageDir(), id);
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
     runConversion(id, req.file.path, outputDir, { generateScreenshots });
     triggerGitSync('upload presentation');
-    res.json({ id, status: 'processing', filename: req.file.originalname, generateScreenshots });
+    res.json({ id, status: 'processing', filename: normalizedOriginalName, generateScreenshots });
 });
 
 // Reprocess

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const db = require('../db');
 const { getDataPaths } = require('../config');
+const { buildSearchableText } = require('../utils/textExtractor');
 
 const router = express.Router();
 
@@ -59,10 +60,12 @@ const getScreenshotUrl = (sourceId, slideOrder) => {
 
 // --- LIST SLIDES ---
 router.get('/slides', (req, res) => {
-    const { sourceId, tagId, starred, search } = req.query;
+    const { sourceId, collectionId, folderId, tagId, starred, search } = req.query;
     const filters = {};
 
     if (sourceId) filters.sourceId = sourceId;
+    if (collectionId) filters.collectionId = collectionId;
+    if (folderId) filters.folderId = folderId;
     if (tagId) filters.tagId = tagId;
     if (starred === 'true') filters.starred = true;
     if (starred === 'false') filters.starred = false;
@@ -161,7 +164,7 @@ router.patch('/slides/:id', (req, res) => {
         return res.status(404).json({ error: 'Slide not found' });
     }
 
-    const { title, tagIds, starred, notes, metadata } = req.body;
+    const { title, tagIds, starred, notes, metadata, collectionId, folderId } = req.body;
     const updates = {};
 
     if (title !== undefined) updates.title = title;
@@ -169,6 +172,8 @@ router.patch('/slides/:id', (req, res) => {
     if (starred !== undefined) updates.starred = starred;
     if (notes !== undefined) updates.notes = notes;
     if (metadata !== undefined) updates.metadata = metadata;
+    if (collectionId !== undefined) updates.collectionId = collectionId || null;
+    if (folderId !== undefined) updates.folderId = folderId || null;
 
     const updatedSlide = db.updateSlide(slide.id, updates);
     triggerGitSync('update slide');
@@ -217,11 +222,29 @@ router.post('/slides/promote', (req, res) => {
     // Promote slides
     const promotedSlides = db.promoteBulkSlides(sourceId, slidesData);
 
-    // Enrich with screenshot URLs
-    const enrichedSlides = promotedSlides.map(slide => ({
-        ...slide,
-        screenshotUrl: getScreenshotUrl(slide.sourceId, slide.sourceSlideOrder)
-    }));
+    // Extract searchable text for each promoted slide
+    const enrichedSlides = promotedSlides.map(slide => {
+        // Get slide content from source presentation
+        const slideContent = getSlideContentFromSource(slide.sourceId, slide.sourceSlideOrder);
+
+        if (slideContent) {
+            // Build searchable text
+            const searchableText = buildSearchableText({
+                title: slide.title,
+                notes: slide.notes || '',
+                content: slideContent.content || []
+            });
+
+            // Update slide with searchable text
+            db.updateSlide(slide.id, { searchableText });
+            slide.searchableText = searchableText;
+        }
+
+        return {
+            ...slide,
+            screenshotUrl: getScreenshotUrl(slide.sourceId, slide.sourceSlideOrder)
+        };
+    });
 
     triggerGitSync('promote slides');
     res.json(enrichedSlides);
@@ -262,6 +285,50 @@ router.post('/slides/bulk-tag', (req, res) => {
     db.bulkTagSlides(slideIds, tagId, action);
     triggerGitSync('bulk tag slides');
     res.json({ success: true });
+});
+
+// --- SYNC SLIDE ORGANIZATION ---
+// Backfill collectionId/folderId for existing slides from their source presentations
+router.post('/slides/sync-organization', (req, res) => {
+    const result = db.syncSlideOrganization();
+    if (result.updated > 0) {
+        triggerGitSync('sync slide organization');
+    }
+    res.json(result);
+});
+
+// --- SYNC SEARCHABLE TEXT ---
+// Backfill searchableText for existing slides that don't have it
+router.post('/slides/sync-searchable-text', (req, res) => {
+    const slides = db.getSlides();
+    let updated = 0;
+
+    for (const slide of slides) {
+        // Skip if already has searchable text with content
+        if (slide.searchableText?.content) {
+            continue;
+        }
+
+        // Get slide content from source presentation
+        const slideContent = getSlideContentFromSource(slide.sourceId, slide.sourceSlideOrder);
+
+        if (slideContent) {
+            const searchableText = buildSearchableText({
+                title: slide.title,
+                notes: slide.notes || '',
+                content: slideContent.content || []
+            });
+
+            db.updateSlide(slide.id, { searchableText });
+            updated++;
+        }
+    }
+
+    if (updated > 0) {
+        triggerGitSync('sync searchable text');
+    }
+
+    res.json({ updated, total: slides.length });
 });
 
 module.exports = router;

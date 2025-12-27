@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
-    getPresentation, getMediaUrl,
+    getPresentation,
     savePresentation, fixWithScreenshot,
     getStoredPrompt, semanticConvert,
     getScreenshotsStatus, generateScreenshots, getScreenshotUrl,
@@ -11,66 +11,12 @@ import type { ScreenshotsStatus, ManagedPresentation } from '../api';
 import {
     ChevronLeft, ChevronRight, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
-    Eye, EyeOff, Grid, Maximize2, Search, ExternalLink, CheckSquare,
+    Eye, EyeOff, Grid, Maximize2, Search, CheckSquare,
     Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download
 } from 'lucide-react';
 import clsx from 'clsx';
 import SlidePromotionModal from '../components/SlidePromotionModal';
-
-// --- Types ---
-
-interface SmartArtNode {
-    id: string;
-    text: string;
-    children: SmartArtNode[];
-    level: number;
-    icon?: string;
-    icon_alt?: string;
-}
-
-interface ComparisonGroup {
-    label: string;
-    visual_cue?: string;
-    items: string[];
-}
-
-interface SequenceStep {
-    step: number;
-    text: string;
-    detail?: string;
-}
-
-interface ListItemData {
-    text: string;
-    level?: number;
-    url?: string;
-    children?: ListItemData[];
-}
-
-interface ContentBlock {
-    type: 'heading' | 'paragraph' | 'list' | 'image' | 'smart_art' | 'table' | 'comparison' | 'sequence' | 'text_with_visual' | 'definition' | 'link' | 'video';
-    title?: string;
-    text?: string;
-    url?: string;
-    level?: number;
-    style?: string;
-    items?: ListItemData[];
-    src?: string;
-    alt?: string;
-    caption?: string;
-    layout?: string;
-    nodes?: SmartArtNode[];
-    rows?: string[][];
-    // Semantic types
-    description?: string;
-    groups?: ComparisonGroup[];
-    steps?: SequenceStep[];
-    visual_description?: string;
-    relationship?: string;
-    term?: string;
-    definition?: string;
-    examples?: string[];
-}
+import { ContentRenderer, getYouTubeId, type ContentBlock } from '../components/ContentRenderer';
 
 interface Slide {
     order: number;
@@ -94,304 +40,13 @@ interface Presentation {
     sections: SectionData[];
 }
 
-// --- Helpers ---
-
-const getYouTubeId = (url: string): string | null => {
-    if (!url) return null;
-    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?/]+)/);
-    return match ? match[1] : null;
-};
-
-// --- Components ---
-
-const SmartArtTree: React.FC<{ nodes: SmartArtNode[], conversionId: string }> = ({ nodes, conversionId }) => {
-    if (!nodes || nodes.length === 0) return null;
-    return (
-        <ul className="list-disc pl-6 space-y-2 mt-2">
-            {nodes.map((node) => (
-                <li key={node.id} className="text-gray-800">
-                    <div className="font-medium flex items-center">
-                        {node.icon && (
-                            <img 
-                                src={getMediaUrl(conversionId, node.icon)} 
-                                alt={node.icon_alt || "Icon"} 
-                                title={node.icon_alt || undefined}
-                                className="w-10 h-10 mr-3 object-contain inline-block bg-white p-1 rounded border border-gray-100 shadow-sm"
-                            />
-                        )}
-                        <span>{node.text || <span className="text-gray-400 italic">(Group)</span>}</span>
-                    </div>
-                    {node.children && node.children.length > 0 && (
-                        <SmartArtTree nodes={node.children} conversionId={conversionId} />
-                    )}
-                </li>
-            ))}
-        </ul>
-    );
-};
-
-const ContentRenderer: React.FC<{
-    block: ContentBlock,
-    conversionId: string,
-    isEditing: boolean,
-    onUpdate: (newBlock: ContentBlock) => void,
-    shouldEmbedYouTube: boolean
-}> = ({ block, conversionId, isEditing, onUpdate, shouldEmbedYouTube }) => {
-    
-    if (isEditing) {
-        if (block.type === 'heading' || block.type === 'paragraph') {
-            return (
-                <textarea 
-                    className="w-full p-2 border rounded mb-4 font-sans text-lg"
-                    value={block.text || ''}
-                    onChange={(e) => onUpdate({ ...block, text: e.target.value })}
-                    rows={block.type === 'heading' ? 1 : 3}
-                />
-            );
-        }
-        if (block.type === 'list') {
-            return (
-                <div className="border p-4 rounded mb-4 bg-gray-50">
-                    <span className="text-xs font-bold text-gray-400 uppercase">List Editor</span>
-                    {block.items?.map((item, i) => (
-                        <input 
-                            key={i}
-                            className="w-full p-1 border-b bg-transparent mb-1"
-                            value={item.text}
-                            onChange={(e) => {
-                                const newItems = [...(block.items || [])];
-                                newItems[i] = { ...item, text: e.target.value };
-                                onUpdate({ ...block, items: newItems });
-                            }}
-                        />
-                    ))}
-                </div>
-            );
-        }
-    }
-
-    switch (block.type) {
-        case 'heading':
-            return <h2 className="text-3xl font-bold mb-6 text-gray-900">{block.text}</h2>;
-        case 'paragraph':
-            return <p className="text-lg text-gray-700 mb-4 leading-relaxed whitespace-pre-wrap">{block.text}</p>;
-        case 'list': {
-            // For lists, find the first YouTube URL to embed (if shouldEmbedYouTube is true)
-            let embeddedYouTubeId: string | null = null;
-            return (
-                <ul className={clsx("mb-4 ml-6 space-y-2 text-gray-700 text-lg", block.style === 'bullet' ? 'list-disc' : 'list-decimal')}>
-                    {block.items?.map((item: ListItemData, i: number) => {
-                        const youtubeId = item.url ? getYouTubeId(item.url) : null;
-                        // Only embed the first YouTube video in this list block (if block is marked for embedding)
-                        const shouldEmbed = shouldEmbedYouTube && youtubeId && !embeddedYouTubeId;
-                        if (shouldEmbed) {
-                            embeddedYouTubeId = youtubeId;
-                        }
-                        // Convert YouTube URLs to watch format for clicking
-                        const clickableUrl = youtubeId
-                            ? `https://www.youtube.com/watch?v=${youtubeId}`
-                            : item.url;
-
-                        return (
-                            <li key={i}>
-                                {item.url ? (
-                                    <a
-                                        href={clickableUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
-                                    >
-                                        {item.text}
-                                        <ExternalLink className="w-3.5 h-3.5 inline-block" />
-                                    </a>
-                                ) : (
-                                    item.text
-                                )}
-                                {shouldEmbed && youtubeId && (
-                                    <div className="mt-3 mb-2">
-                                        <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
-                                            <iframe
-                                                className="absolute inset-0 w-full h-full rounded-lg shadow-md"
-                                                src={`https://www.youtube.com/embed/${youtubeId}`}
-                                                title={item.text}
-                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                                allowFullScreen
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-                            </li>
-                        );
-                    })}
-                </ul>
-            );
-        }
-        case 'image':
-            return (
-                <div className="my-6">
-                    <img src={getMediaUrl(conversionId, block.src || '')} alt={block.alt} className="max-w-full h-auto rounded shadow-sm border border-gray-100" />
-                    {block.caption && <p className="text-sm text-gray-500 mt-2 text-center">{block.caption}</p>}
-                </div>
-            );
-        case 'smart_art':
-            return (
-                <div className="my-6 p-6 bg-blue-50 border border-blue-200 rounded-lg shadow-inner">
-                    <h3 className="text-md font-bold text-blue-800 uppercase tracking-wide mb-4 flex items-center">
-                        <span className="bg-blue-600 text-white px-2 py-0.5 rounded mr-2 text-xs">DIAGRAM</span>
-                        <span>{block.layout || 'SmartArt'}</span>
-                    </h3>
-                    <SmartArtTree nodes={block.nodes || []} conversionId={conversionId} />
-                </div>
-            );
-        case 'table':
-            return (
-                <div className="my-6 overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
-                    <table className="min-w-full divide-y divide-gray-200 bg-white">
-                        <tbody className="divide-y divide-gray-100">
-                            {block.rows?.map((row: string[], ri: number) => (
-                                <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                                    {row.map((cell: string, ci: number) => (
-                                        <td key={ci} className="px-4 py-3 text-sm text-gray-700 border-r border-gray-100 last:border-0 whitespace-pre-wrap">{cell}</td>
-                                    ))}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            );
-        case 'comparison':
-            return (
-                <div className="my-6 p-6 bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl shadow-sm">
-                    {block.description && (
-                        <p className="text-sm text-indigo-700 font-medium mb-4 italic">{block.description}</p>
-                    )}
-                    <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${block.groups?.length || 1}, 1fr)` }}>
-                        {block.groups?.map((group, gi) => (
-                            <div key={gi} className="bg-white rounded-lg p-4 shadow-sm border border-indigo-100">
-                                <h4 className="font-bold text-indigo-900 mb-1">{group.label}</h4>
-                                {group.visual_cue && (
-                                    <p className="text-xs text-indigo-500 mb-3 italic">{group.visual_cue}</p>
-                                )}
-                                <ul className="space-y-2">
-                                    {group.items.map((item, ii) => (
-                                        <li key={ii} className="text-gray-700 pl-3 border-l-2 border-indigo-300">{item}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        case 'sequence':
-            return (
-                <div className="my-6 p-6 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl shadow-sm">
-                    {block.description && (
-                        <p className="text-sm text-emerald-700 font-medium mb-4 italic">{block.description}</p>
-                    )}
-                    <div className="space-y-3">
-                        {block.steps?.map((step, si) => (
-                            <div key={si} className="flex items-start gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
-                                    {step.step}
-                                </div>
-                                <div className="flex-1 pt-1">
-                                    <p className="font-medium text-gray-900">{step.text}</p>
-                                    {step.detail && <p className="text-sm text-gray-600 mt-1">{step.detail}</p>}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        case 'text_with_visual':
-            return (
-                <div className="my-6 p-6 bg-amber-50 border border-amber-200 rounded-xl shadow-sm">
-                    <p className="text-lg text-gray-800 mb-3">{block.text}</p>
-                    {block.visual_description && (
-                        <div className="text-sm text-amber-700 bg-amber-100 rounded-lg p-3 mt-2">
-                            <span className="font-semibold">Visual: </span>{block.visual_description}
-                        </div>
-                    )}
-                    {block.relationship && (
-                        <p className="text-xs text-amber-600 mt-2 italic">{block.relationship}</p>
-                    )}
-                </div>
-            );
-        case 'definition':
-            return (
-                <div className="my-6 p-6 bg-sky-50 border border-sky-200 rounded-xl shadow-sm">
-                    <h4 className="font-bold text-sky-900 text-xl mb-2">{block.term}</h4>
-                    <p className="text-gray-700 mb-3">{block.definition}</p>
-                    {block.examples && block.examples.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-sky-200">
-                            <span className="text-xs font-bold text-sky-600 uppercase tracking-wide">Examples:</span>
-                            <ul className="mt-2 space-y-1">
-                                {block.examples.map((ex, ei) => (
-                                    <li key={ei} className="text-sm text-gray-600 pl-3 border-l-2 border-sky-300">{ex}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-                </div>
-            );
-        case 'link': {
-            const youtubeId = block.url ? getYouTubeId(block.url) : null;
-            // Convert YouTube URLs to watch format for clicking (embed URLs don't work for direct navigation)
-            const clickableUrl = youtubeId
-                ? `https://www.youtube.com/watch?v=${youtubeId}`
-                : block.url;
-            return (
-                <div className="my-4">
-                    <a
-                        href={clickableUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-all"
-                    >
-                        <ExternalLink className="w-4 h-4" />
-                        <span className="font-medium">{block.text || block.url}</span>
-                    </a>
-                    {shouldEmbedYouTube && youtubeId && (
-                        <div className="mt-4">
-                            <div className="relative w-full max-w-2xl" style={{ paddingBottom: '56.25%' }}>
-                                <iframe
-                                    className="absolute inset-0 w-full h-full rounded-lg shadow-lg border border-gray-200"
-                                    src={`https://www.youtube.com/embed/${youtubeId}`}
-                                    title={block.text || 'YouTube Video'}
-                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                    allowFullScreen
-                                />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-        case 'video':
-            return (
-                <div className="my-6">
-                    {block.title && (
-                        <p className="text-sm font-medium text-gray-600 mb-2">{block.title}</p>
-                    )}
-                    <video
-                        src={getMediaUrl(conversionId, block.src || '')}
-                        controls
-                        className="max-w-full h-auto rounded-lg shadow-md border border-gray-200"
-                        style={{ maxHeight: '500px' }}
-                    >
-                        Your browser does not support the video tag.
-                    </video>
-                </div>
-            );
-        default: return null;
-    }
-};
-
 export const ViewerPage: React.FC = () => {
     const { type, id, resultId } = useParams<{ type: string, id: string, resultId: string }>();
-    
+    const [searchParams] = useSearchParams();
+
     const [data, setData] = useState<Presentation | null>(null);
     const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+    const [initialSlideSet, setInitialSlideSet] = useState(false);
     const [loading, setLoading] = useState(true);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [viewMode, setViewMode] = useState<'slides' | 'json'>('slides');
@@ -429,6 +84,7 @@ export const ViewerPage: React.FC = () => {
     const [selectedSlides, setSelectedSlides] = useState<Set<number>>(new Set());
     const [batchProcessing, setBatchProcessing] = useState(false);
     const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+    const [batchErrors, setBatchErrors] = useState<{ slideOrder: number; error: string }[]>([]);
 
     // Grid zoom state (number of columns: 2, 3, 4, or 6)
     const [gridZoom, setGridZoom] = useState(3);
@@ -491,6 +147,24 @@ export const ViewerPage: React.FC = () => {
         };
         fetchData();
     }, [type, id, resultId]);
+
+    // Set initial slide from query param (e.g., ?slide=5)
+    useEffect(() => {
+        if (!allSlides.length || initialSlideSet) return;
+
+        const slideParam = searchParams.get('slide');
+        if (slideParam) {
+            const slideOrder = parseInt(slideParam, 10);
+            if (!isNaN(slideOrder)) {
+                // Find the slide index by order number
+                const idx = allSlides.findIndex(s => s.order === slideOrder);
+                if (idx >= 0) {
+                    setCurrentSlideIndex(idx);
+                }
+            }
+        }
+        setInitialSlideSet(true);
+    }, [allSlides, searchParams, initialSlideSet]);
 
     // Fetch presentation info and screenshot status
     useEffect(() => {
@@ -593,8 +267,10 @@ export const ViewerPage: React.FC = () => {
         if (selectedSlides.size === 0 || !screenshotsStatus?.hasScreenshots) return;
 
         setBatchProcessing(true);
+        setBatchErrors([]);
         const slideIndices = Array.from(selectedSlides).sort((a, b) => a - b);
         setBatchProgress({ current: 0, total: slideIndices.length });
+        const errors: { slideOrder: number; error: string }[] = [];
 
         for (let i = 0; i < slideIndices.length; i++) {
             const slideIdx = slideIndices[i];
@@ -626,12 +302,15 @@ export const ViewerPage: React.FC = () => {
                     return newData;
                 });
             } catch (err) {
-                console.error(`Failed to convert slide ${slide.order}:`, err);
+                const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                console.error(`Failed to convert slide ${slide.order}:`, errorMsg);
+                errors.push({ slideOrder: slide.order, error: errorMsg });
             }
         }
 
         setBatchProcessing(false);
         setBatchProgress(null);
+        setBatchErrors(errors);
         setSelectedSlides(new Set());
     };
 
@@ -1043,6 +722,22 @@ export const ViewerPage: React.FC = () => {
                                     <span className="text-xs text-amber-600">
                                         Generate screenshots to enable batch conversion
                                     </span>
+                                )}
+
+                                {/* Batch error display */}
+                                {batchErrors.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-red-600">
+                                            {batchErrors.length} slide{batchErrors.length > 1 ? 's' : ''} failed
+                                            {batchErrors.some(e => e.error.includes('timed out')) && ' (timeout)'}
+                                        </span>
+                                        <button
+                                            onClick={() => setBatchErrors([])}
+                                            className="text-xs text-gray-400 hover:text-gray-600"
+                                        >
+                                            Dismiss
+                                        </button>
+                                    </div>
                                 )}
 
                                 {/* Zoom controls */}

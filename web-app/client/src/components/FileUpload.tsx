@@ -132,10 +132,17 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         );
     }
 
-    // Files selected - show file list
+    // Files selected - show file list (with drag-drop support)
     if (selectedFiles.length > 0) {
         return (
-            <div className="border-2 border-dashed border-blue-300 bg-blue-50 rounded-lg p-6">
+            <div
+                className={`border-2 border-dashed rounded-lg p-6 transition-colors
+                    ${dragging ? 'border-blue-500 bg-blue-100' : 'border-blue-300 bg-blue-50'}
+                `}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
+            >
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="font-medium text-gray-900">
                         {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected
@@ -170,17 +177,20 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 </div>
 
                 {/* Add more files */}
-                <label className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 cursor-pointer mb-4">
-                    <Upload className="w-4 h-4" />
-                    Add more files
-                    <input
-                        type="file"
-                        multiple
-                        className="hidden"
-                        accept=".pptx,.ppt"
-                        onChange={handleFileSelect}
-                    />
-                </label>
+                <div className="flex items-center gap-4 mb-4">
+                    <label className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 cursor-pointer">
+                        <Upload className="w-4 h-4" />
+                        Add more files
+                        <input
+                            type="file"
+                            multiple
+                            className="hidden"
+                            accept=".pptx,.ppt"
+                            onChange={handleFileSelect}
+                        />
+                    </label>
+                    <span className="text-xs text-gray-400">or drag & drop</span>
+                </div>
 
                 {/* Screenshot option */}
                 <label className="flex items-center gap-2 mb-4 cursor-pointer select-none text-gray-600">

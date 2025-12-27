@@ -26,6 +26,7 @@ const ContentTypeIcon: React.FC<{ type: string; className?: string }> = ({ type,
 interface SlideCardProps {
     slide: Slide | PresentationSlide;
     tags?: Tag[];
+    presentationName?: string;
     selected?: boolean;
     onSelect?: () => void;
     onClick?: () => void;
@@ -37,6 +38,7 @@ interface SlideCardProps {
 export const SlideCard: React.FC<SlideCardProps> = ({
     slide,
     tags = [],
+    presentationName,
     selected = false,
     onSelect,
     onClick,
@@ -142,6 +144,13 @@ export const SlideCard: React.FC<SlideCardProps> = ({
                     {title}
                 </h3>
 
+                {/* Presentation name */}
+                {presentationName && (
+                    <p className="text-xs text-gray-500 truncate mt-0.5">
+                        {presentationName}
+                    </p>
+                )}
+
                 {/* Content type icons */}
                 {contentTypes.length > 0 && (
                     <div className="flex items-center gap-1 mt-1">
@@ -169,6 +178,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
 interface SlideGridProps {
     slides: (Slide | PresentationSlide)[];
     tags?: Tag[];
+    presentations?: { id: string; originalName: string }[];
     selectedIds?: Set<string | number>;
     onSelectSlide?: (id: string | number) => void;
     onClickSlide?: (slide: Slide | PresentationSlide) => void;
@@ -181,6 +191,7 @@ interface SlideGridProps {
 export const SlideGrid: React.FC<SlideGridProps> = ({
     slides,
     tags = [],
+    presentations = [],
     selectedIds = new Set(),
     onSelectSlide,
     onClickSlide,
@@ -189,6 +200,10 @@ export const SlideGrid: React.FC<SlideGridProps> = ({
     compact = false,
     emptyMessage = "No slides found"
 }) => {
+    // Create a map for quick lookup of presentation names
+    const presentationMap = new Map(
+        presentations.map(p => [p.id, p.originalName?.replace(/\.pptx?$/i, '') || 'Unknown'])
+    );
     if (slides.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-gray-500">
@@ -212,11 +227,14 @@ export const SlideGrid: React.FC<SlideGridProps> = ({
         )}>
             {slides.map((slide) => {
                 const key = getSlideKey(slide);
+                const sourceId = 'sourceId' in slide ? slide.sourceId : undefined;
+                const presName = sourceId ? presentationMap.get(sourceId) : undefined;
                 return (
                     <SlideCard
                         key={key}
                         slide={slide}
                         tags={tags}
+                        presentationName={presName}
                         selected={selectedIds.has(key)}
                         onSelect={onSelectSlide ? () => onSelectSlide(key) : undefined}
                         onClick={onClickSlide ? () => onClickSlide(slide) : undefined}
