@@ -17,8 +17,13 @@ export interface SmartArtNode {
 export interface ComparisonGroup {
     label: string;
     visual_cue?: string;
-    items: string[];
+    items: (string | { text: string; icon?: string })[];
 }
+
+// Helper to get text from a string or object item
+const getItemText = (item: string | { text: string; icon?: string }): string => {
+    return typeof item === 'string' ? item : item.text;
+};
 
 export interface SequenceStep {
     step: number;
@@ -30,8 +35,17 @@ export interface ListItemData {
     text: string;
     level?: number;
     url?: string;
+    icon?: string;
     children?: ListItemData[];
 }
+
+// Normalize list items to handle string, {text, icon}, {text, url} formats
+const normalizeListItem = (item: string | ListItemData | { text: string; icon?: string }): ListItemData => {
+    if (typeof item === 'string') {
+        return { text: item };
+    }
+    return item as ListItemData;
+};
 
 export interface ContentBlock {
     type: 'heading' | 'paragraph' | 'list' | 'image' | 'smart_art' | 'table' | 'comparison' | 'sequence' | 'text_with_visual' | 'definition' | 'link' | 'video';
@@ -40,7 +54,7 @@ export interface ContentBlock {
     url?: string;
     level?: number;
     style?: string;
-    items?: ListItemData[];
+    items?: (string | ListItemData)[];  // Can be strings or objects
     src?: string;
     alt?: string;
     caption?: string;
@@ -55,7 +69,7 @@ export interface ContentBlock {
     relationship?: string;
     term?: string;
     definition?: string;
-    examples?: string[];
+    examples?: (string | { text: string })[];
 }
 
 // --- Helpers ---
@@ -196,7 +210,9 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
             let embeddedYouTubeId: string | null = null;
             return wrapWithDelete(
                 <ul className={clsx(`mb-4 ml-6 space-y-2 text-gray-700 ${textSize}`, block.style === 'bullet' ? 'list-disc' : 'list-decimal')}>
-                    {block.items?.map((item: ListItemData, i: number) => {
+                    {block.items?.map((rawItem: string | ListItemData, i: number) => {
+                        // Normalize item to handle string, {text, icon}, {text, url} formats
+                        const item = normalizeListItem(rawItem);
                         const youtubeId = item.url ? getYouTubeId(item.url) : null;
                         // Only embed the first YouTube video in this list block (if block is marked for embedding)
                         const shouldEmbed = shouldEmbedYouTube && youtubeId && !embeddedYouTubeId && !compact;
@@ -209,33 +225,42 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                             : item.url;
 
                         return (
-                            <li key={i}>
-                                {item.url ? (
-                                    <a
-                                        href={clickableUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
-                                    >
-                                        {item.text}
-                                        <ExternalLink className="w-3.5 h-3.5 inline-block" />
-                                    </a>
-                                ) : (
-                                    item.text
+                            <li key={i} className="flex items-start gap-2">
+                                {item.icon && (
+                                    <img
+                                        src={getMediaUrl(conversionId, item.icon)}
+                                        alt=""
+                                        className="w-5 h-5 object-contain flex-shrink-0 mt-0.5"
+                                    />
                                 )}
-                                {shouldEmbed && youtubeId && (
-                                    <div className="mt-3 mb-2">
-                                        <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
-                                            <iframe
-                                                className="absolute inset-0 w-full h-full rounded-lg shadow-md"
-                                                src={`https://www.youtube.com/embed/${youtubeId}`}
-                                                title={item.text}
-                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                                allowFullScreen
-                                            />
+                                <span className="flex-1">
+                                    {item.url ? (
+                                        <a
+                                            href={clickableUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                                        >
+                                            {item.text}
+                                            <ExternalLink className="w-3.5 h-3.5 inline-block" />
+                                        </a>
+                                    ) : (
+                                        item.text
+                                    )}
+                                    {shouldEmbed && youtubeId && (
+                                        <div className="mt-3 mb-2">
+                                            <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                                                <iframe
+                                                    className="absolute inset-0 w-full h-full rounded-lg shadow-md"
+                                                    src={`https://www.youtube.com/embed/${youtubeId}`}
+                                                    title={item.text}
+                                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                    allowFullScreen
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
+                                </span>
                             </li>
                         );
                     })}
@@ -297,7 +322,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                                 )}
                                 <ul className="space-y-2">
                                     {group.items.slice(0, compact ? 3 : undefined).map((item, ii) => (
-                                        <li key={ii} className={`text-gray-700 pl-3 border-l-2 border-indigo-300 ${compact ? 'text-xs' : ''}`}>{item}</li>
+                                        <li key={ii} className={`text-gray-700 pl-3 border-l-2 border-indigo-300 ${compact ? 'text-xs' : ''}`}>{getItemText(item)}</li>
                                     ))}
                                     {compact && group.items.length > 3 && (
                                         <li className="text-xs text-indigo-400">+{group.items.length - 3} more</li>
@@ -356,7 +381,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                             <span className="text-xs font-bold text-sky-600 uppercase tracking-wide">Examples:</span>
                             <ul className="mt-2 space-y-1">
                                 {block.examples.map((ex, ei) => (
-                                    <li key={ei} className="text-sm text-gray-600 pl-3 border-l-2 border-sky-300">{ex}</li>
+                                    <li key={ei} className="text-sm text-gray-600 pl-3 border-l-2 border-sky-300">{getItemText(ex)}</li>
                                 ))}
                             </ul>
                         </div>
