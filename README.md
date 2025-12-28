@@ -16,6 +16,8 @@ Transform PowerPoint presentations into interactive, semantic web-based learning
 - **Semantic Conversion**: Transform raw extraction into structured learning content (comparisons, sequences, definitions)
 - **Visual Correction**: Upload screenshots to fix extraction errors
 - **Batch Processing**: Convert multiple slides at once with progress tracking
+- **Include Media Files**: Optionally send slide images to AI for better alt text and semantic placement
+- **Preview & Review**: Side-by-side comparison before accepting AI changes
 
 ### Web App Features
 - **Grid View**: Side-by-side comparison of original screenshots and converted content
@@ -26,6 +28,8 @@ Transform PowerPoint presentations into interactive, semantic web-based learning
 - **ZIP Export**: Download presentations with all media files for external use
 - **Batch Operations**: Move multiple presentations between collections/folders
 - **Inline Editing**: Edit presentation metadata (name, description, tags) directly in the library
+- **Delete Content Blocks**: Remove unwanted images or content with hover X button
+- **JSON Editor**: Directly edit slide JSON with validation and instant apply
 
 ## Screenshots
 
@@ -260,9 +264,10 @@ ppt-to-learning/
 ### Gemini Model Selection
 
 In the Settings modal, you can choose between:
-- `gemini-2.0-flash-exp` (default, fast)
-- `gemini-1.5-pro` (more capable)
-- `gemini-1.5-flash` (balanced)
+- `gemini-3-flash-preview` (default, latest flash model)
+- `gemini-3-pro-preview` (most capable reasoning)
+- `gemini-2.5-flash` (stable, fast)
+- `gemini-2.5-pro` (stable pro with adaptive thinking)
 
 ### Screenshot Generation
 
@@ -284,6 +289,13 @@ Screenshots require LibreOffice and Poppler. If not installed, the app will stil
 - Try a different model in Settings
 
 ## Changelog
+
+### v0.3 (2025-12-28)
+- **Enhanced Slide Editing**: Delete content blocks with hover X button, direct JSON editor with validation
+- **Gemini Preview Modal**: Side-by-side comparison of original vs AI-generated content before applying
+- **Include Media Files**: Option to send extracted images to Gemini for better alt text and semantic placement
+- **Improved Prompts**: AI now positions images correctly and extracts text from images into linked fields
+- **UI Improvements**: Cancel edit button, JSON apply feedback, improved filename encoding
 
 ### v0.2 (2025-12-27)
 - **ZIP Export**: Export presentations with all media files as downloadable ZIP
