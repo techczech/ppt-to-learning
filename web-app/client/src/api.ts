@@ -486,10 +486,20 @@ export const fixWithScreenshot = async (screenshot: File, currentJson: any, prom
 };
 
 // Semantic Conversion - Transform screenshot + raw extraction into semantic content
-export const semanticConvert = async (screenshot: File, rawExtraction: any) => {
+export const semanticConvert = async (
+    screenshot: File,
+    rawExtraction: any,
+    options?: { conversionId?: string; includeMedia?: boolean }
+) => {
     const formData = new FormData();
     formData.append('screenshot', screenshot);
     formData.append('rawExtraction', JSON.stringify(rawExtraction));
+    if (options?.conversionId) {
+        formData.append('conversionId', options.conversionId);
+    }
+    if (options?.includeMedia) {
+        formData.append('includeMedia', 'true');
+    }
     const res = await api.post(`/ai/convert`, formData);
     return res.data;
 };

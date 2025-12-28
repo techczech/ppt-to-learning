@@ -283,8 +283,14 @@ async function fixWithScreenshot(screenshotBuffer, mimeType, currentJson, userKe
 /**
  * Convert a slide screenshot + raw extraction into semantic content.
  * This is the core function for transforming visual slide layouts into meaningful structured content.
+ * @param {Buffer} screenshotBuffer - Screenshot image data
+ * @param {string} mimeType - Screenshot MIME type
+ * @param {Object} rawExtraction - Raw extraction JSON from the slide
+ * @param {string} userKey - Optional Gemini API key
+ * @param {string} modelName - Model to use
+ * @param {Array} mediaFiles - Optional array of {path, buffer, mimeType} for slide media
  */
-async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL) {
+async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = []) {
     const key = userKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error("No Gemini API Key provided.");
 
@@ -305,23 +311,53 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
 
     console.log(`[AI] Found ${imageList.length} images/icons in extraction`);
 
+    // Build additional prompt section when media files are included
+    let attachedImagesSection = '';
+    if (mediaFiles.length > 0) {
+        attachedImagesSection = `\n\nATTACHED IMAGES: The following ${mediaFiles.length} images from this slide are attached and you can see them:\n` +
+            mediaFiles.map((m, i) => `- Image ${i + 2}: ${m.path}`).join('\n') +
+            '\n\nFor each attached image:\n' +
+            '1. Note the file name (e.g., media/image1.png) and use this exact path in the output\n' +
+            '2. Position the image in the correct semantic location based on where it appears in the slide screenshot\n' +
+            '3. Generate descriptive alt text based on what you actually see in the image\n' +
+            '4. If the image contains text (labels, captions, titles), extract that text and include it in a semantically linked field (e.g., "label", "caption", or within the parent structure\'s text fields)\n' +
+            '5. Match each image to its logical place in comparisons, sequences, or other semantic structures';
+    }
+
     const prompt = SEMANTIC_PROMPT
         .replace('{{RAW_EXTRACTION}}', JSON.stringify(rawExtraction.content || rawExtraction, null, 2))
-        .replace('{{IMAGE_LIST}}', imageListStr);
+        .replace('{{IMAGE_LIST}}', imageListStr) + attachedImagesSection;
 
     console.log(`[AI] Prompt length: ${prompt.length} chars`);
 
-    const imagePart = {
-        inlineData: {
-            data: screenshotBuffer.toString("base64"),
-            mimeType
+    // Build image parts array - screenshot first, then media files
+    const imageParts = [
+        {
+            inlineData: {
+                data: screenshotBuffer.toString("base64"),
+                mimeType
+            }
         }
-    };
+    ];
+
+    // Add media files if provided
+    for (const media of mediaFiles) {
+        imageParts.push({
+            inlineData: {
+                data: media.buffer.toString("base64"),
+                mimeType: media.mimeType
+            }
+        });
+    }
+
+    if (mediaFiles.length > 0) {
+        console.log(`[AI] Including ${mediaFiles.length} media files in request`);
+    }
 
     try {
         console.log(`[AI] Sending request to Gemini API (timeout: ${API_TIMEOUT_MS / 1000}s)...`);
         const result = await withTimeout(
-            model.generateContent([prompt, imagePart]),
+            model.generateContent([prompt, ...imageParts]),
             API_TIMEOUT_MS,
             'Semantic conversion'
         );
@@ -343,4 +379,4 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
     }
 }
 
-module.exports = { analyzeSlide, fixWithScreenshot, semanticConvert, getAvailableModels };
+module.exports = { analyzeSlide, fixWithScreenshot, semanticConvert, getAvailableModels, extractImageList };

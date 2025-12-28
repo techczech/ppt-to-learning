@@ -72,6 +72,7 @@ export const ViewerPage: React.FC = () => {
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [previewFile, setPreviewFile] = useState<File | null>(null);
     const [showPreview, setShowPreview] = useState(false);
+    const [includeMediaInConversion, setIncludeMediaInConversion] = useState(false);
 
     // Screenshot state
     const [screenshotsStatus, setScreenshotsStatus] = useState<ScreenshotsStatus | null>(null);
@@ -293,7 +294,10 @@ export const ViewerPage: React.FC = () => {
                 const blob = await response.blob();
                 const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
 
-                const res = await semanticConvert(file, slide);
+                const res = await semanticConvert(file, slide, {
+                    conversionId: id,
+                    includeMedia: includeMediaInConversion
+                });
 
                 // Update the slide in data
                 setData(prevData => {
@@ -460,7 +464,10 @@ export const ViewerPage: React.FC = () => {
             }
 
             setAIStatus('Sending to Gemini API...');
-            const res = await semanticConvert(fileToSend, currentSlide);
+            const res = await semanticConvert(fileToSend, currentSlide, {
+                conversionId: id,
+                includeMedia: includeMediaInConversion
+            });
 
             setAIStatus('Processing response...');
 
@@ -1200,6 +1207,20 @@ export const ViewerPage: React.FC = () => {
                                             </div>
                                         )}
                                 </div>
+
+                                {/* Include Media Option */}
+                                <label className="flex items-center gap-2 mb-4 p-2 bg-indigo-50/50 rounded-lg cursor-pointer hover:bg-indigo-100/50">
+                                    <input
+                                        type="checkbox"
+                                        checked={includeMediaInConversion}
+                                        onChange={(e) => setIncludeMediaInConversion(e.target.checked)}
+                                        className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div>
+                                        <span className="text-xs font-medium text-indigo-800">Include slide images</span>
+                                        <p className="text-[10px] text-indigo-600">Send extracted images to AI for better alt text</p>
+                                    </div>
+                                </label>
 
                                 {/* Manual Upload Fallback */}
                                 <label className={clsx(
