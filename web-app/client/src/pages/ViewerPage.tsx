@@ -9,10 +9,10 @@ import {
 } from '../api';
 import type { ScreenshotsStatus, ManagedPresentation } from '../api';
 import {
-    ChevronLeft, ChevronRight, Menu, Home, Code,
+    ChevronLeft, ChevronRight, ChevronDown, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
     Eye, EyeOff, Grid, Maximize2, Search, CheckSquare, Check,
-    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download
+    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download, FileText
 } from 'lucide-react';
 import clsx from 'clsx';
 import SlidePromotionModal from '../components/SlidePromotionModal';
@@ -73,6 +73,8 @@ export const ViewerPage: React.FC = () => {
     const [previewFile, setPreviewFile] = useState<File | null>(null);
     const [showPreview, setShowPreview] = useState(false);
     const [includeMediaInConversion, setIncludeMediaInConversion] = useState(false);
+    const [additionalPrompt, setAdditionalPrompt] = useState('');
+    const [showPromptEditor, setShowPromptEditor] = useState(false);
 
     // Screenshot state
     const [screenshotsStatus, setScreenshotsStatus] = useState<ScreenshotsStatus | null>(null);
@@ -466,7 +468,8 @@ export const ViewerPage: React.FC = () => {
             setAIStatus('Sending to Gemini API...');
             const res = await semanticConvert(fileToSend, currentSlide, {
                 conversionId: id,
-                includeMedia: includeMediaInConversion
+                includeMedia: includeMediaInConversion,
+                additionalPrompt: additionalPrompt.trim() || undefined
             });
 
             setAIStatus('Processing response...');
@@ -1093,7 +1096,7 @@ export const ViewerPage: React.FC = () => {
                     {showPreview && previewImage && (
                         <div className="space-y-4">
                             <div className="p-4 bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl">
-                                <h4 className="text-sm font-black text-indigo-800 uppercase mb-3 tracking-wide">Preview</h4>
+                                <h4 className="text-sm font-black text-indigo-800 uppercase mb-3 tracking-wide">Preview & Options</h4>
 
                                 {/* Image Preview */}
                                 <div className="mb-4">
@@ -1105,12 +1108,59 @@ export const ViewerPage: React.FC = () => {
                                     />
                                 </div>
 
-                                {/* Current Slide Data Preview */}
+                                {/* Options */}
+                                <div className="mb-4 p-3 bg-white rounded-lg border border-indigo-100 space-y-3">
+                                    <p className="text-xs font-bold text-indigo-800 uppercase">Conversion Options</p>
+
+                                    {/* Include Media */}
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={includeMediaInConversion}
+                                            onChange={(e) => setIncludeMediaInConversion(e.target.checked)}
+                                            className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-medium text-gray-700">Include slide images</span>
+                                            <span className="text-[10px] text-gray-500 ml-1">
+                                                ({currentSlide?.content?.filter(b => b.type === 'image').length || 0} images)
+                                            </span>
+                                        </div>
+                                    </label>
+
+                                    {/* Additional Instructions */}
+                                    <div>
+                                        <p className="text-xs text-gray-600 mb-1 font-medium">Additional instructions:</p>
+                                        <textarea
+                                            value={additionalPrompt}
+                                            onChange={(e) => setAdditionalPrompt(e.target.value)}
+                                            placeholder="E.g., 'Focus on the comparison', 'This is in Czech'..."
+                                            className="w-full h-16 text-xs p-2 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Context Details (Collapsible) */}
                                 <div className="mb-4">
-                                    <p className="text-xs text-gray-500 mb-2 font-medium">Current slide data (will be sent as context):</p>
-                                    <pre className="text-[10px] bg-gray-900 text-green-400 p-3 rounded-lg overflow-auto max-h-32 font-mono">
-                                        {JSON.stringify(currentSlide, null, 2)}
-                                    </pre>
+                                    <button
+                                        onClick={() => setShowPromptEditor(!showPromptEditor)}
+                                        className="flex items-center gap-2 text-xs font-medium text-gray-600 hover:text-indigo-700"
+                                    >
+                                        <ChevronDown className={clsx("w-3 h-3 transition-transform", showPromptEditor && "rotate-180")} />
+                                        {showPromptEditor ? 'Hide' : 'Show'} full context being sent
+                                    </button>
+                                    {showPromptEditor && (
+                                        <div className="mt-2">
+                                            <pre className="text-[9px] bg-gray-900 text-green-400 p-3 rounded-lg overflow-auto max-h-48 font-mono">
+{`=== SLIDE DATA ===
+${JSON.stringify(currentSlide, null, 2)}
+
+=== OPTIONS ===
+Include media files: ${includeMediaInConversion ? 'Yes' : 'No'}
+${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : ''}`}
+                                            </pre>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Error display */}
@@ -1221,6 +1271,42 @@ export const ViewerPage: React.FC = () => {
                                         <p className="text-[10px] text-indigo-600">Send extracted images to AI for better alt text</p>
                                     </div>
                                 </label>
+
+                                {/* Prompt Editor (Collapsible) */}
+                                <div className="mb-4">
+                                    <button
+                                        onClick={() => setShowPromptEditor(!showPromptEditor)}
+                                        className="flex items-center gap-2 w-full p-2 text-left text-xs font-medium text-indigo-700 hover:bg-indigo-50 rounded-lg"
+                                    >
+                                        <ChevronDown className={clsx("w-4 h-4 transition-transform", showPromptEditor && "rotate-180")} />
+                                        <FileText className="w-4 h-4" />
+                                        Prompt & Context
+                                    </button>
+                                    {showPromptEditor && (
+                                        <div className="mt-2 space-y-3">
+                                            {/* Context Preview */}
+                                            <div>
+                                                <p className="text-[10px] text-gray-500 mb-1 font-medium">Context being sent:</p>
+                                                <pre className="text-[9px] bg-gray-900 text-green-400 p-2 rounded-lg overflow-auto max-h-24 font-mono">
+{`Slide ${currentSlide?.order}: ${currentSlide?.title || 'Untitled'}
+Content blocks: ${currentSlide?.content?.length || 0}
+Images: ${currentSlide?.content?.filter(b => b.type === 'image').length || 0}
+Include media: ${includeMediaInConversion ? 'Yes' : 'No'}`}
+                                                </pre>
+                                            </div>
+                                            {/* Additional Instructions */}
+                                            <div>
+                                                <p className="text-[10px] text-gray-500 mb-1 font-medium">Additional instructions (optional):</p>
+                                                <textarea
+                                                    value={additionalPrompt}
+                                                    onChange={(e) => setAdditionalPrompt(e.target.value)}
+                                                    placeholder="E.g., 'Focus on the comparison between X and Y', 'Extract the timeline as a sequence', 'This slide is in Czech language'..."
+                                                    className="w-full h-20 text-xs p-2 border border-indigo-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
 
                                 {/* Manual Upload Fallback */}
                                 <label className={clsx(

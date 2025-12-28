@@ -49,6 +49,7 @@ router.post('/ai/convert', memUpload.single('screenshot'), async (req, res) => {
         const rawExtraction = JSON.parse(req.body.rawExtraction);
         const includeMedia = req.body.includeMedia === 'true';
         const conversionId = req.body.conversionId;
+        const additionalPrompt = req.body.additionalPrompt || '';
 
         // Load media files if requested
         let mediaFiles = [];
@@ -81,7 +82,8 @@ router.post('/ai/convert', memUpload.single('screenshot'), async (req, res) => {
             rawExtraction,
             userKey,
             modelName,
-            mediaFiles
+            mediaFiles,
+            additionalPrompt
         );
 
         res.json({ semanticContent });

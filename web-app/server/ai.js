@@ -289,8 +289,9 @@ async function fixWithScreenshot(screenshotBuffer, mimeType, currentJson, userKe
  * @param {string} userKey - Optional Gemini API key
  * @param {string} modelName - Model to use
  * @param {Array} mediaFiles - Optional array of {path, buffer, mimeType} for slide media
+ * @param {string} additionalPrompt - Optional additional instructions from user
  */
-async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = []) {
+async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = [], additionalPrompt = '') {
     const key = userKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error("No Gemini API Key provided.");
 
@@ -324,9 +325,16 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
             '5. Match each image to its logical place in comparisons, sequences, or other semantic structures';
     }
 
+    // Build additional user instructions section
+    let userInstructionsSection = '';
+    if (additionalPrompt) {
+        userInstructionsSection = `\n\nADDITIONAL USER INSTRUCTIONS:\n${additionalPrompt}`;
+        console.log(`[AI] Additional prompt: ${additionalPrompt.substring(0, 100)}...`);
+    }
+
     const prompt = SEMANTIC_PROMPT
         .replace('{{RAW_EXTRACTION}}', JSON.stringify(rawExtraction.content || rawExtraction, null, 2))
-        .replace('{{IMAGE_LIST}}', imageListStr) + attachedImagesSection;
+        .replace('{{IMAGE_LIST}}', imageListStr) + attachedImagesSection + userInstructionsSection;
 
     console.log(`[AI] Prompt length: ${prompt.length} chars`);
 

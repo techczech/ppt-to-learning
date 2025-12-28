@@ -489,7 +489,7 @@ export const fixWithScreenshot = async (screenshot: File, currentJson: any, prom
 export const semanticConvert = async (
     screenshot: File,
     rawExtraction: any,
-    options?: { conversionId?: string; includeMedia?: boolean }
+    options?: { conversionId?: string; includeMedia?: boolean; additionalPrompt?: string }
 ) => {
     const formData = new FormData();
     formData.append('screenshot', screenshot);
@@ -499,6 +499,9 @@ export const semanticConvert = async (
     }
     if (options?.includeMedia) {
         formData.append('includeMedia', 'true');
+    }
+    if (options?.additionalPrompt) {
+        formData.append('additionalPrompt', options.additionalPrompt);
     }
     const res = await api.post(`/ai/convert`, formData);
     return res.data;
