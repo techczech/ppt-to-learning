@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import SlidePromotionModal from '../components/SlidePromotionModal';
+import GeminiPreviewModal from '../components/GeminiPreviewModal';
 import { ContentRenderer, getYouTubeId, type ContentBlock } from '../components/ContentRenderer';
 
 interface Slide {
@@ -52,7 +53,14 @@ export const ViewerPage: React.FC = () => {
     const [viewMode, setViewMode] = useState<'slides' | 'json'>('slides');
     const [isEditing, setIsEditing] = useState(false);
     const [saving, setSaving] = useState(false);
-    
+    const [jsonEditText, setJsonEditText] = useState('');
+    const [jsonError, setJsonError] = useState<string | null>(null);
+
+    // Gemini preview state
+    const [showGeminiPreview, setShowGeminiPreview] = useState(false);
+    const [pendingAIContent, setPendingAIContent] = useState<ContentBlock[]>([]);
+    const [pendingAITitle, setPendingAITitle] = useState<string | undefined>(undefined);
+
     // AI State
     const [aiPanelOpen, setAIPanelOpen] = useState(false);
     const [aiLoading, setAILoading] = useState(false);
@@ -427,7 +435,7 @@ export const ViewerPage: React.FC = () => {
         setAIStatus('');
     };
 
-    // Step 2: Actually run the conversion after user confirms
+    // Step 2: Run conversion and show preview modal for user to review
     const handleSemanticConvert = async () => {
         if (!currentSlide || (!previewFile && !previewImage)) return;
 
@@ -454,30 +462,16 @@ export const ViewerPage: React.FC = () => {
             const res = await semanticConvert(fileToSend, currentSlide);
 
             setAIStatus('Processing response...');
-            const newData = { ...data! };
-            let found = false;
-            newData.sections.forEach(sec => {
-                const idx = sec.slides.findIndex(s => s.order === currentSlide.order);
-                if (idx !== -1) {
-                    // Replace content with semantic version
-                    sec.slides[idx].content = res.semanticContent.content;
-                    // Update title if provided
-                    if (res.semanticContent.title) {
-                        sec.slides[idx].title = res.semanticContent.title;
-                    }
-                    found = true;
-                }
-            });
 
-            if (found) {
-                setData(newData);
-                const summary = res.semanticContent.summary || 'Content converted to semantic format.';
-                const semanticType = res.semanticContent.semantic_type || 'mixed';
-                setAIReport(`**Semantic Conversion Complete**\n\nType: ${semanticType}\n\n${summary}\n\nReview the converted content and save if satisfied.`);
-                setShowPreview(false);
-                setPreviewImage(null);
-                setPreviewFile(null);
-            }
+            // Store in pending state and show preview modal
+            setPendingAIContent(res.semanticContent.content || []);
+            setPendingAITitle(res.semanticContent.title);
+            setShowGeminiPreview(true);
+
+            // Close the preview panel
+            setShowPreview(false);
+            setPreviewImage(null);
+            setPreviewFile(null);
         } catch (e: any) {
             setAIReport(`**Error:** ${e.message || 'Unknown error'}\n\nTry selecting a different model in Settings.`);
         }
@@ -485,6 +479,25 @@ export const ViewerPage: React.FC = () => {
             setAILoading(false);
             setAIStatus('');
         }
+    };
+
+    // Apply accepted AI content to the slide
+    const applyAIContent = (content: ContentBlock[], title?: string) => {
+        if (!data || !currentSlide) return;
+        const newData = { ...data };
+        newData.sections.forEach(sec => {
+            const idx = sec.slides.findIndex(s => s.order === currentSlide.order);
+            if (idx !== -1) {
+                sec.slides[idx].content = content;
+                if (title) {
+                    sec.slides[idx].title = title;
+                }
+            }
+        });
+        setData(newData);
+        setShowGeminiPreview(false);
+        setPendingAIContent([]);
+        setPendingAITitle(undefined);
     };
 
     const cancelPreview = () => {
@@ -504,6 +517,49 @@ export const ViewerPage: React.FC = () => {
             }
         });
         setData(newData);
+    };
+
+    const deleteBlock = (index: number) => {
+        if (!data) return;
+        const newData = { ...data };
+        newData.sections.forEach(sec => {
+            const slide = sec.slides.find(s => s.order === currentSlide.order);
+            if (slide) {
+                slide.content = slide.content.filter((_, i) => i !== index);
+            }
+        });
+        setData(newData);
+    };
+
+    // Sync JSON edit text when switching to JSON view or slide changes
+    React.useEffect(() => {
+        if (viewMode === 'json' && allSlides[currentSlideIndex]) {
+            setJsonEditText(JSON.stringify(allSlides[currentSlideIndex], null, 2));
+            setJsonError(null);
+        }
+    }, [viewMode, currentSlideIndex, allSlides]);
+
+    // Apply JSON edits to current slide
+    const applyJsonEdit = () => {
+        if (!data) return;
+        try {
+            const parsed = JSON.parse(jsonEditText);
+            // Validate it has required slide fields
+            if (typeof parsed.order !== 'number' || !Array.isArray(parsed.content)) {
+                throw new Error('Invalid slide structure: must have "order" and "content" array');
+            }
+            const newData = { ...data };
+            newData.sections.forEach(sec => {
+                const slideIdx = sec.slides.findIndex(s => s.order === currentSlide.order);
+                if (slideIdx !== -1) {
+                    sec.slides[slideIdx] = { ...sec.slides[slideIdx], ...parsed };
+                }
+            });
+            setData(newData);
+            setJsonError(null);
+        } catch (err) {
+            setJsonError(err instanceof Error ? err.message : 'Invalid JSON');
+        }
     };
 
     if (loading) return <div className="p-10 flex items-center justify-center h-screen text-gray-400">Loading...</div>;
@@ -658,9 +714,40 @@ export const ViewerPage: React.FC = () => {
 
                 <div className="flex-1 overflow-y-auto p-12 bg-gray-50/50 flex justify-center">
                     {viewMode === 'json' ? (
-                        <pre className="bg-gray-900 text-green-400 p-8 rounded-2xl overflow-auto text-sm font-mono w-full max-w-5xl h-fit shadow-2xl border border-gray-800">
-                            {JSON.stringify(data, null, 2)}
-                        </pre>
+                        <div className="w-full max-w-5xl">
+                            <div className="mb-4 flex items-center justify-between">
+                                <h3 className="text-sm font-medium text-gray-600">
+                                    Editing: Slide {currentSlide?.order} - {currentSlide?.title || 'Untitled'}
+                                </h3>
+                                <div className="flex items-center gap-2">
+                                    {jsonError && (
+                                        <span className="text-sm text-red-600">{jsonError}</span>
+                                    )}
+                                    <button
+                                        onClick={applyJsonEdit}
+                                        disabled={!!jsonError}
+                                        className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Apply Changes
+                                    </button>
+                                </div>
+                            </div>
+                            <textarea
+                                value={jsonEditText}
+                                onChange={(e) => {
+                                    setJsonEditText(e.target.value);
+                                    // Validate on change
+                                    try {
+                                        JSON.parse(e.target.value);
+                                        setJsonError(null);
+                                    } catch (err) {
+                                        setJsonError(err instanceof Error ? err.message : 'Invalid JSON');
+                                    }
+                                }}
+                                className="w-full h-[calc(100vh-250px)] bg-gray-900 text-green-400 p-6 rounded-2xl text-sm font-mono shadow-2xl border border-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                spellCheck={false}
+                            />
+                        </div>
                     ) : gridView ? (
                         /* Grid View with Batch Actions */
                         <div className="w-full max-w-7xl">
@@ -926,6 +1013,7 @@ export const ViewerPage: React.FC = () => {
                                             conversionId={conversionId}
                                             isEditing={isEditing}
                                             onUpdate={(newBlock) => updateBlock(idx, newBlock)}
+                                            onDelete={() => deleteBlock(idx)}
                                             shouldEmbedYouTube={embedIndices.has(idx)}
                                         />
                                     ));
@@ -1171,6 +1259,26 @@ export const ViewerPage: React.FC = () => {
                 onPromoted={() => {
                     // Optionally refresh or show a notification
                     console.log('Slides promoted to library');
+                }}
+            />
+
+            {/* Gemini Preview Modal */}
+            <GeminiPreviewModal
+                isOpen={showGeminiPreview}
+                onClose={() => {
+                    setShowGeminiPreview(false);
+                    setPendingAIContent([]);
+                    setPendingAITitle(undefined);
+                }}
+                originalContent={currentSlide?.content || []}
+                aiContent={pendingAIContent}
+                aiTitle={pendingAITitle}
+                conversionId={conversionId}
+                onAccept={applyAIContent}
+                onReject={() => {
+                    setShowGeminiPreview(false);
+                    setPendingAIContent([]);
+                    setPendingAITitle(undefined);
                 }}
             />
         </div>

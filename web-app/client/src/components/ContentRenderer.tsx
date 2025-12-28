@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import clsx from 'clsx';
 import { getMediaUrl } from '../api';
 
@@ -99,15 +99,40 @@ export interface ContentRendererProps {
     conversionId: string;
     isEditing?: boolean;
     onUpdate?: (newBlock: ContentBlock) => void;
+    onDelete?: () => void;
     shouldEmbedYouTube?: boolean;
     compact?: boolean; // For preview mode in grid
 }
+
+// Wrapper component for blocks in edit mode with delete button
+const EditableBlockWrapper: React.FC<{
+    isEditing: boolean;
+    onDelete?: () => void;
+    children: React.ReactNode;
+}> = ({ isEditing, onDelete, children }) => {
+    if (!isEditing || !onDelete) {
+        return <>{children}</>;
+    }
+    return (
+        <div className="relative group">
+            <button
+                onClick={onDelete}
+                className="absolute -top-2 -right-2 z-10 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 shadow-md"
+                title="Remove this block"
+            >
+                <X className="w-4 h-4" />
+            </button>
+            {children}
+        </div>
+    );
+};
 
 export const ContentRenderer: React.FC<ContentRendererProps> = ({
     block,
     conversionId,
     isEditing = false,
     onUpdate = () => {},
+    onDelete,
     shouldEmbedYouTube = false,
     compact = false
 }) => {
@@ -115,31 +140,35 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
     if (isEditing) {
         if (block.type === 'heading' || block.type === 'paragraph') {
             return (
-                <textarea
-                    className="w-full p-2 border rounded mb-4 font-sans text-lg"
-                    value={block.text || ''}
-                    onChange={(e) => onUpdate({ ...block, text: e.target.value })}
-                    rows={block.type === 'heading' ? 1 : 3}
-                />
+                <EditableBlockWrapper isEditing={isEditing} onDelete={onDelete}>
+                    <textarea
+                        className="w-full p-2 border rounded mb-4 font-sans text-lg"
+                        value={block.text || ''}
+                        onChange={(e) => onUpdate({ ...block, text: e.target.value })}
+                        rows={block.type === 'heading' ? 1 : 3}
+                    />
+                </EditableBlockWrapper>
             );
         }
         if (block.type === 'list') {
             return (
-                <div className="border p-4 rounded mb-4 bg-gray-50">
-                    <span className="text-xs font-bold text-gray-400 uppercase">List Editor</span>
-                    {block.items?.map((item, i) => (
-                        <input
-                            key={i}
-                            className="w-full p-1 border-b bg-transparent mb-1"
-                            value={item.text}
-                            onChange={(e) => {
-                                const newItems = [...(block.items || [])];
-                                newItems[i] = { ...item, text: e.target.value };
-                                onUpdate({ ...block, items: newItems });
-                            }}
-                        />
-                    ))}
-                </div>
+                <EditableBlockWrapper isEditing={isEditing} onDelete={onDelete}>
+                    <div className="border p-4 rounded mb-4 bg-gray-50">
+                        <span className="text-xs font-bold text-gray-400 uppercase">List Editor</span>
+                        {block.items?.map((item, i) => (
+                            <input
+                                key={i}
+                                className="w-full p-1 border-b bg-transparent mb-1"
+                                value={item.text}
+                                onChange={(e) => {
+                                    const newItems = [...(block.items || [])];
+                                    newItems[i] = { ...item, text: e.target.value };
+                                    onUpdate({ ...block, items: newItems });
+                                }}
+                            />
+                        ))}
+                    </div>
+                </EditableBlockWrapper>
             );
         }
     }
@@ -150,15 +179,22 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
     const marginY = compact ? 'my-2' : 'my-6';
     const padding = compact ? 'p-3' : 'p-6';
 
+    // Helper to wrap content with delete button when editing
+    const wrapWithDelete = (content: React.ReactNode) => (
+        <EditableBlockWrapper isEditing={isEditing} onDelete={onDelete}>
+            {content}
+        </EditableBlockWrapper>
+    );
+
     switch (block.type) {
         case 'heading':
-            return <h2 className={`${headingSize} text-gray-900`}>{block.text}</h2>;
+            return wrapWithDelete(<h2 className={`${headingSize} text-gray-900`}>{block.text}</h2>);
         case 'paragraph':
-            return <p className={`${textSize} text-gray-700 mb-4 leading-relaxed whitespace-pre-wrap`}>{block.text}</p>;
+            return wrapWithDelete(<p className={`${textSize} text-gray-700 mb-4 leading-relaxed whitespace-pre-wrap`}>{block.text}</p>);
         case 'list': {
             // For lists, find the first YouTube URL to embed (if shouldEmbedYouTube is true)
             let embeddedYouTubeId: string | null = null;
-            return (
+            return wrapWithDelete(
                 <ul className={clsx(`mb-4 ml-6 space-y-2 text-gray-700 ${textSize}`, block.style === 'bullet' ? 'list-disc' : 'list-decimal')}>
                     {block.items?.map((item: ListItemData, i: number) => {
                         const youtubeId = item.url ? getYouTubeId(item.url) : null;
@@ -208,20 +244,20 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
         }
         case 'image':
             if (compact) {
-                return (
+                return wrapWithDelete(
                     <div className="my-2">
                         <img src={getMediaUrl(conversionId, block.src || '')} alt={block.alt} className="max-w-full h-auto rounded" />
                     </div>
                 );
             }
-            return (
+            return wrapWithDelete(
                 <div className={marginY}>
                     <img src={getMediaUrl(conversionId, block.src || '')} alt={block.alt} className="max-w-full h-auto rounded shadow-sm border border-gray-100" />
                     {block.caption && <p className="text-sm text-gray-500 mt-2 text-center">{block.caption}</p>}
                 </div>
             );
         case 'smart_art':
-            return (
+            return wrapWithDelete(
                 <div className={`${marginY} ${padding} bg-blue-50 border border-blue-200 rounded-lg shadow-inner`}>
                     <h3 className={`${compact ? 'text-sm' : 'text-md'} font-bold text-blue-800 uppercase tracking-wide mb-4 flex items-center`}>
                         <span className="bg-blue-600 text-white px-2 py-0.5 rounded mr-2 text-xs">DIAGRAM</span>
@@ -231,7 +267,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                 </div>
             );
         case 'table':
-            return (
+            return wrapWithDelete(
                 <div className={`${marginY} overflow-x-auto rounded-lg border border-gray-200 shadow-sm`}>
                     <table className="min-w-full divide-y divide-gray-200 bg-white">
                         <tbody className="divide-y divide-gray-100">
@@ -247,7 +283,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                 </div>
             );
         case 'comparison':
-            return (
+            return wrapWithDelete(
                 <div className={`${marginY} ${padding} bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl shadow-sm`}>
                     {block.description && (
                         <p className={`${compact ? 'text-xs' : 'text-sm'} text-indigo-700 font-medium mb-4 italic`}>{block.description}</p>
@@ -273,7 +309,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                 </div>
             );
         case 'sequence':
-            return (
+            return wrapWithDelete(
                 <div className={`${marginY} ${padding} bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl shadow-sm`}>
                     {block.description && (
                         <p className={`${compact ? 'text-xs' : 'text-sm'} text-emerald-700 font-medium mb-4 italic`}>{block.description}</p>
@@ -297,7 +333,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                 </div>
             );
         case 'text_with_visual':
-            return (
+            return wrapWithDelete(
                 <div className={`${marginY} ${padding} bg-amber-50 border border-amber-200 rounded-xl shadow-sm`}>
                     <p className={`${textSize} text-gray-800 mb-3`}>{block.text}</p>
                     {block.visual_description && !compact && (
@@ -311,7 +347,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                 </div>
             );
         case 'definition':
-            return (
+            return wrapWithDelete(
                 <div className={`${marginY} ${padding} bg-sky-50 border border-sky-200 rounded-xl shadow-sm`}>
                     <h4 className={`font-bold text-sky-900 ${compact ? 'text-base' : 'text-xl'} mb-2`}>{block.term}</h4>
                     <p className={`text-gray-700 ${compact ? 'text-sm' : ''} mb-3`}>{block.definition}</p>
@@ -333,7 +369,7 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
             const clickableUrl = youtubeId
                 ? `https://www.youtube.com/watch?v=${youtubeId}`
                 : block.url;
-            return (
+            return wrapWithDelete(
                 <div className="my-4">
                     <a
                         href={clickableUrl}
@@ -362,13 +398,13 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
         }
         case 'video':
             if (compact) {
-                return (
+                return wrapWithDelete(
                     <div className="my-2 text-sm text-gray-500 italic">
                         [Video: {block.title || 'Untitled'}]
                     </div>
                 );
             }
-            return (
+            return wrapWithDelete(
                 <div className={marginY}>
                     {block.title && (
                         <p className="text-sm font-medium text-gray-600 mb-2">{block.title}</p>
