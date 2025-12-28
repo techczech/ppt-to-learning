@@ -11,7 +11,7 @@ import type { ScreenshotsStatus, ManagedPresentation } from '../api';
 import {
     ChevronLeft, ChevronRight, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
-    Eye, EyeOff, Grid, Maximize2, Search, CheckSquare,
+    Eye, EyeOff, Grid, Maximize2, Search, CheckSquare, Check,
     Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -55,6 +55,7 @@ export const ViewerPage: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [jsonEditText, setJsonEditText] = useState('');
     const [jsonError, setJsonError] = useState<string | null>(null);
+    const [jsonApplied, setJsonApplied] = useState(false);
 
     // Gemini preview state
     const [showGeminiPreview, setShowGeminiPreview] = useState(false);
@@ -557,8 +558,12 @@ export const ViewerPage: React.FC = () => {
             });
             setData(newData);
             setJsonError(null);
+            setJsonApplied(true);
+            // Clear success message after 2 seconds
+            setTimeout(() => setJsonApplied(false), 2000);
         } catch (err) {
             setJsonError(err instanceof Error ? err.message : 'Invalid JSON');
+            setJsonApplied(false);
         }
     };
 
@@ -700,10 +705,15 @@ export const ViewerPage: React.FC = () => {
                         <div className="h-6 w-px bg-gray-200 mx-2" />
 
                         {isEditing ? (
-                            <button onClick={handleSave} disabled={saving} className="flex items-center px-4 py-2 bg-green-600 text-white rounded-full text-xs font-bold uppercase tracking-widest shadow-lg hover:bg-green-700">
-                                {saving ? <Loader2 className="animate-spin w-4 h-4 mr-2"/> : <Save className="w-4 h-4 mr-2" />}
-                                Save Changes
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setIsEditing(false)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-gray-200">
+                                    <X className="w-4 h-4 mr-2" /> Cancel
+                                </button>
+                                <button onClick={handleSave} disabled={saving} className="flex items-center px-4 py-2 bg-green-600 text-white rounded-full text-xs font-bold uppercase tracking-widest shadow-lg hover:bg-green-700">
+                                    {saving ? <Loader2 className="animate-spin w-4 h-4 mr-2"/> : <Save className="w-4 h-4 mr-2" />}
+                                    Save Changes
+                                </button>
+                            </div>
                         ) : (
                             <button onClick={() => setIsEditing(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-gray-200">
                                 <Edit3 className="w-4 h-4 mr-2" /> Edit Slide
@@ -722,6 +732,11 @@ export const ViewerPage: React.FC = () => {
                                 <div className="flex items-center gap-2">
                                     {jsonError && (
                                         <span className="text-sm text-red-600">{jsonError}</span>
+                                    )}
+                                    {jsonApplied && (
+                                        <span className="text-sm text-green-600 flex items-center gap-1">
+                                            <Check className="w-4 h-4" /> Applied!
+                                        </span>
                                     )}
                                     <button
                                         onClick={applyJsonEdit}

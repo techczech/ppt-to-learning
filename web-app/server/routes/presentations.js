@@ -45,9 +45,23 @@ router.post('/upload', upload.single('file'), (req, res) => {
     const collectionId = req.body.collectionId || null;
     const folderId = req.body.folderId || null;
 
+    // Fix character encoding issues from multipart form uploads
+    // The filename might come through as latin1-encoded UTF-8, so we try to decode it
+    let originalName = req.file.originalname;
+    try {
+        // Try decoding as latin1->utf8 (common browser encoding issue)
+        const decoded = Buffer.from(originalName, 'latin1').toString('utf8');
+        // Only use decoded if it looks valid (contains non-ASCII chars that make sense)
+        if (decoded !== originalName && /[\u0080-\uFFFF]/.test(decoded)) {
+            originalName = decoded;
+        }
+    } catch (e) {
+        // Keep original if decoding fails
+    }
     // Normalize Unicode to NFC (composed form) to fix accented characters
     // e.g., "jóga" might come as "jo\u0301ga" (decomposed) - normalize to "jóga" (composed)
-    const normalizedOriginalName = req.file.originalname.normalize('NFC');
+    const normalizedOriginalName = originalName.normalize('NFC');
+    console.log(`[Upload] Original: "${req.file.originalname}" -> Normalized: "${normalizedOriginalName}"`);
 
     db.addPresentation(id, req.file.filename, normalizedOriginalName, { collectionId, folderId });
     const outputDir = path.join(getStorageDir(), id);
