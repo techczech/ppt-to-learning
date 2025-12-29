@@ -15,9 +15,12 @@ Transform PowerPoint presentations into interactive, semantic web-based learning
 ### AI-Powered Enhancement (Google Gemini)
 - **Semantic Conversion**: Transform raw extraction into structured learning content (comparisons, sequences, definitions)
 - **Visual Correction**: Upload screenshots to fix extraction errors
-- **Batch Processing**: Convert multiple slides at once with progress tracking
+- **Batch Processing**: Convert multiple slides with individual accept/reject preview
 - **Include Media Files**: Optionally send slide images to AI for better alt text and semantic placement
 - **Preview & Review**: Side-by-side comparison before accepting AI changes
+- **Visual Pattern Preservation**: Reproduce icon sequences with emoji/Unicode symbols
+- **AI Image Generation**: Generate alternative images using Gemini's image model (optional, costs extra)
+- **Custom Prompts**: Add slide-specific instructions to guide AI conversion
 
 ### Web App Features
 - **Grid View**: Side-by-side comparison of original screenshots and converted content
@@ -289,6 +292,14 @@ Screenshots require LibreOffice and Poppler. If not installed, the app will stil
 - Try a different model in Settings
 
 ## Changelog
+
+### v0.4 (2025-12-30)
+- **Unified Gemini Conversion**: Single "Convert with Gemini" button works for both single slides and batch selections
+- **Batch Preview Panel**: Review batch conversion results individually with accept/reject per slide and bulk actions
+- **AI Image Generation**: New option to generate alternative images using `gemini-3-pro-image-preview` model (with cost warning)
+- **Visual Pattern Preservation**: Option to reproduce icon sequences and visual patterns with emoji/Unicode symbols
+- **Custom Prompt Editor**: Add slide-specific instructions to guide AI conversion with full context visibility
+- **Improved List Rendering**: Fixed handling of mixed string/object formats in list items from AI responses
 
 ### v0.3 (2025-12-28)
 - **Enhanced Slide Editing**: Delete content blocks with hover X button, direct JSON editor with validation
