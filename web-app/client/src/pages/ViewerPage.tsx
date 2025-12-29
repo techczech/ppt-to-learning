@@ -17,6 +17,7 @@ import {
 import clsx from 'clsx';
 import SlidePromotionModal from '../components/SlidePromotionModal';
 import GeminiPreviewModal from '../components/GeminiPreviewModal';
+import { BatchPreviewPanel, type BatchResult } from '../components/BatchPreviewPanel';
 import { ContentRenderer, getYouTubeId, type ContentBlock } from '../components/ContentRenderer';
 
 interface Slide {
@@ -73,6 +74,8 @@ export const ViewerPage: React.FC = () => {
     const [previewFile, setPreviewFile] = useState<File | null>(null);
     const [showPreview, setShowPreview] = useState(false);
     const [includeMediaInConversion, setIncludeMediaInConversion] = useState(false);
+    const [preserveVisuals, setPreserveVisuals] = useState(false);
+    const [generateAltImages, setGenerateAltImages] = useState(false);
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [showPromptEditor, setShowPromptEditor] = useState(false);
 
@@ -97,6 +100,10 @@ export const ViewerPage: React.FC = () => {
     const [batchProcessing, setBatchProcessing] = useState(false);
     const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
     const [batchErrors, setBatchErrors] = useState<{ slideOrder: number; error: string }[]>([]);
+
+    // Batch conversion results for preview
+    const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+    const [showBatchPanel, setShowBatchPanel] = useState(false);
 
     // Grid zoom state (number of columns: 2, 3, 4, or 6)
     const [gridZoom, setGridZoom] = useState(3);
@@ -274,20 +281,38 @@ export const ViewerPage: React.FC = () => {
         setSelectedSlides(new Set());
     };
 
-    // Batch Gemini conversion
+    // Batch Gemini conversion - stores results for preview
     const handleBatchConvert = async () => {
         if (selectedSlides.size === 0 || !screenshotsStatus?.hasScreenshots) return;
 
+        const slideIndices = Array.from(selectedSlides).sort((a, b) => a - b);
+
+        // Initialize batch results with 'pending' status
+        const initialResults: BatchResult[] = slideIndices.map(idx => ({
+            slideOrder: allSlides[idx].order,
+            slideTitle: allSlides[idx].title || `Slide ${allSlides[idx].order}`,
+            slideIndex: idx,
+            originalContent: allSlides[idx].content,
+            aiContent: [],
+            status: 'pending' as const
+        }));
+
+        setBatchResults(initialResults);
+        setShowBatchPanel(true);
         setBatchProcessing(true);
         setBatchErrors([]);
-        const slideIndices = Array.from(selectedSlides).sort((a, b) => a - b);
         setBatchProgress({ current: 0, total: slideIndices.length });
-        const errors: { slideOrder: number; error: string }[] = [];
 
+        // Process slides sequentially
         for (let i = 0; i < slideIndices.length; i++) {
             const slideIdx = slideIndices[i];
             const slide = allSlides[slideIdx];
             setBatchProgress({ current: i + 1, total: slideIndices.length });
+
+            // Update status to 'converting'
+            setBatchResults(prev => prev.map((r, idx) =>
+                idx === i ? { ...r, status: 'converting' as const } : r
+            ));
 
             try {
                 // Fetch screenshot and convert
@@ -298,35 +323,92 @@ export const ViewerPage: React.FC = () => {
 
                 const res = await semanticConvert(file, slide, {
                     conversionId: id,
-                    includeMedia: includeMediaInConversion
+                    includeMedia: includeMediaInConversion,
+                    preserveVisuals,
+                    generateImages: generateAltImages
                 });
 
-                // Update the slide in data
-                setData(prevData => {
-                    if (!prevData) return prevData;
-                    const newData = { ...prevData };
-                    newData.sections.forEach(sec => {
-                        const idx = sec.slides.findIndex(s => s.order === slide.order);
-                        if (idx !== -1) {
-                            sec.slides[idx].content = res.semanticContent.content;
-                            if (res.semanticContent.title) {
-                                sec.slides[idx].title = res.semanticContent.title;
-                            }
-                        }
-                    });
-                    return newData;
-                });
+                // Update to 'ready' with AI content (don't auto-apply)
+                setBatchResults(prev => prev.map((r, idx) =>
+                    idx === i ? {
+                        ...r,
+                        status: 'ready' as const,
+                        aiContent: res.semanticContent.content || [],
+                        aiTitle: res.semanticContent.title
+                    } : r
+                ));
             } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : 'Unknown error';
                 console.error(`Failed to convert slide ${slide.order}:`, errorMsg);
-                errors.push({ slideOrder: slide.order, error: errorMsg });
+                // Update to 'error' status
+                setBatchResults(prev => prev.map((r, idx) =>
+                    idx === i ? { ...r, status: 'error' as const, error: errorMsg } : r
+                ));
             }
         }
 
         setBatchProcessing(false);
         setBatchProgress(null);
-        setBatchErrors(errors);
         setSelectedSlides(new Set());
+    };
+
+    // Accept a single batch result - apply AI content to the slide
+    const handleBatchAccept = (slideOrder: number) => {
+        const result = batchResults.find(r => r.slideOrder === slideOrder);
+        if (!result || result.status !== 'ready') return;
+
+        // Apply AI content to the slide
+        setData(prevData => {
+            if (!prevData) return prevData;
+            const newData = { ...prevData };
+            newData.sections.forEach(sec => {
+                const idx = sec.slides.findIndex(s => s.order === slideOrder);
+                if (idx !== -1) {
+                    sec.slides[idx].content = result.aiContent;
+                    if (result.aiTitle) {
+                        sec.slides[idx].title = result.aiTitle;
+                    }
+                }
+            });
+            return newData;
+        });
+
+        // Update batch result status
+        setBatchResults(prev => prev.map(r =>
+            r.slideOrder === slideOrder ? { ...r, status: 'accepted' as const } : r
+        ));
+    };
+
+    // Reject a single batch result - keep original content
+    const handleBatchReject = (slideOrder: number) => {
+        setBatchResults(prev => prev.map(r =>
+            r.slideOrder === slideOrder ? { ...r, status: 'rejected' as const } : r
+        ));
+    };
+
+    // Accept all ready results
+    const handleBatchAcceptAll = () => {
+        batchResults
+            .filter(r => r.status === 'ready')
+            .forEach(r => handleBatchAccept(r.slideOrder));
+    };
+
+    // Reject all ready results
+    const handleBatchRejectAll = () => {
+        setBatchResults(prev => prev.map(r =>
+            r.status === 'ready' ? { ...r, status: 'rejected' as const } : r
+        ));
+    };
+
+    // Close batch panel
+    const closeBatchPanel = () => {
+        setShowBatchPanel(false);
+        // Clear results after a delay to allow for re-opening
+        setTimeout(() => {
+            if (!showBatchPanel) {
+                setBatchResults([]);
+            }
+        }, 300);
     };
 
     // Delete selected slides
@@ -469,6 +551,8 @@ export const ViewerPage: React.FC = () => {
             const res = await semanticConvert(fileToSend, currentSlide, {
                 conversionId: id,
                 includeMedia: includeMediaInConversion,
+                preserveVisuals,
+                generateImages: generateAltImages,
                 additionalPrompt: additionalPrompt.trim() || undefined
             });
 
@@ -709,7 +793,7 @@ export const ViewerPage: React.FC = () => {
                             className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-full text-xs font-bold uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md"
                         >
                             {aiLoading ? <Loader2 className="animate-spin w-4 h-4 mr-2"/> : <Wand2 className="w-4 h-4 mr-2" />}
-                            Fix with Gemini
+                            Convert with Gemini
                         </button>
 
                         <div className="h-6 w-px bg-gray-200 mx-2" />
@@ -798,7 +882,7 @@ export const ViewerPage: React.FC = () => {
                                             {selectedSlides.size} selected
                                         </span>
                                         <button
-                                            onClick={handleBatchConvert}
+                                            onClick={() => setAIPanelOpen(true)}
                                             disabled={batchProcessing || !screenshotsStatus?.hasScreenshots}
                                             className="px-3 py-1.5 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
                                         >
@@ -1128,6 +1212,37 @@ export const ViewerPage: React.FC = () => {
                                         </div>
                                     </label>
 
+                                    {/* Preserve Visual Patterns */}
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={preserveVisuals}
+                                            onChange={(e) => setPreserveVisuals(e.target.checked)}
+                                            className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-medium text-gray-700">Preserve visual patterns</span>
+                                            <p className="text-[10px] text-gray-500">Reproduce icon sequences with emoji/symbols</p>
+                                        </div>
+                                    </label>
+
+                                    {/* Generate Alternative Images */}
+                                    <label className="flex items-start gap-2 cursor-pointer p-2 -mx-2 bg-amber-50/50 rounded-lg border border-amber-200">
+                                        <input
+                                            type="checkbox"
+                                            checked={generateAltImages}
+                                            onChange={(e) => setGenerateAltImages(e.target.checked)}
+                                            className="w-4 h-4 mt-0.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-medium text-amber-800">Generate alternative images</span>
+                                            <p className="text-[10px] text-amber-600">Use AI to create new images based on slide content</p>
+                                            <p className="text-[10px] text-red-600 font-medium mt-1">
+                                                Costs extra - image generation is billed separately
+                                            </p>
+                                        </div>
+                                    </label>
+
                                     {/* Additional Instructions */}
                                     <div>
                                         <p className="text-xs text-gray-600 mb-1 font-medium">Additional instructions:</p>
@@ -1157,6 +1272,7 @@ ${JSON.stringify(currentSlide, null, 2)}
 
 === OPTIONS ===
 Include media files: ${includeMediaInConversion ? 'Yes' : 'No'}
+Preserve visual patterns: ${preserveVisuals ? 'Yes' : 'No'}
 ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : ''}`}
                                             </pre>
                                         </div>
@@ -1209,13 +1325,27 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                 <h4 className="text-sm font-black text-indigo-800 uppercase mb-2 tracking-wide flex items-center">
                                     <Wand2 className="w-4 h-4 mr-2" /> Semantic Conversion
                                 </h4>
-                                <p className="text-xs text-indigo-600 mb-4">
-                                    Convert this slide into semantic learning content.
-                                    The AI will understand visual layout and create structured content (comparisons, sequences, etc.)
-                                </p>
 
-                                {/* Screenshot Status & Actions */}
-                                <div className="mb-4 p-3 bg-white rounded-lg border border-indigo-100">
+                                {/* Batch Mode Indicator */}
+                                {selectedSlides.size > 0 && gridView ? (
+                                    <div className="mb-4 p-3 bg-indigo-100 rounded-lg border border-indigo-200">
+                                        <p className="text-sm font-bold text-indigo-800">
+                                            {selectedSlides.size} slides selected
+                                        </p>
+                                        <p className="text-xs text-indigo-600">
+                                            Configure options below, then click "Convert {selectedSlides.size} Slides"
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-indigo-600 mb-4">
+                                        Convert this slide into semantic learning content.
+                                        The AI will understand visual layout and create structured content (comparisons, sequences, etc.)
+                                    </p>
+                                )}
+
+                                {/* Screenshot Status & Actions - Hide for batch mode */}
+                                {!(selectedSlides.size > 0 && gridView) && (
+                                    <div className="mb-4 p-3 bg-white rounded-lg border border-indigo-100">
                                         {screenshotsStatus?.hasScreenshots ? (
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center text-green-700">
@@ -1256,10 +1386,11 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                                 </button>
                                             </div>
                                         )}
-                                </div>
+                                    </div>
+                                )}
 
                                 {/* Include Media Option */}
-                                <label className="flex items-center gap-2 mb-4 p-2 bg-indigo-50/50 rounded-lg cursor-pointer hover:bg-indigo-100/50">
+                                <label className="flex items-center gap-2 mb-2 p-2 bg-indigo-50/50 rounded-lg cursor-pointer hover:bg-indigo-100/50">
                                     <input
                                         type="checkbox"
                                         checked={includeMediaInConversion}
@@ -1269,6 +1400,37 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                     <div>
                                         <span className="text-xs font-medium text-indigo-800">Include slide images</span>
                                         <p className="text-[10px] text-indigo-600">Send extracted images to AI for better alt text</p>
+                                    </div>
+                                </label>
+
+                                {/* Preserve Visual Patterns Option */}
+                                <label className="flex items-center gap-2 mb-2 p-2 bg-indigo-50/50 rounded-lg cursor-pointer hover:bg-indigo-100/50">
+                                    <input
+                                        type="checkbox"
+                                        checked={preserveVisuals}
+                                        onChange={(e) => setPreserveVisuals(e.target.checked)}
+                                        className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div>
+                                        <span className="text-xs font-medium text-indigo-800">Preserve visual patterns</span>
+                                        <p className="text-[10px] text-indigo-600">Reproduce icon sequences with emoji/symbols</p>
+                                    </div>
+                                </label>
+
+                                {/* Generate Alternative Images Option */}
+                                <label className="flex items-start gap-2 mb-4 p-2 bg-amber-50 rounded-lg cursor-pointer hover:bg-amber-100 border border-amber-200">
+                                    <input
+                                        type="checkbox"
+                                        checked={generateAltImages}
+                                        onChange={(e) => setGenerateAltImages(e.target.checked)}
+                                        className="w-4 h-4 mt-0.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <div>
+                                        <span className="text-xs font-medium text-amber-800">Generate alternative images</span>
+                                        <p className="text-[10px] text-amber-600">Use AI to create new images based on slide content</p>
+                                        <p className="text-[10px] text-red-600 font-medium mt-1">
+                                            Costs extra - image generation is billed separately
+                                        </p>
                                     </div>
                                 </label>
 
@@ -1308,39 +1470,65 @@ Include media: ${includeMediaInConversion ? 'Yes' : 'No'}`}
                                     )}
                                 </div>
 
-                                {/* Manual Upload Fallback */}
-                                <label className={clsx(
-                                    "flex flex-col items-center justify-center w-full h-20 border-2 border-dashed rounded-xl cursor-pointer transition-all",
-                                    aiLoading ? "border-gray-300 bg-gray-50" : "border-indigo-300 hover:border-indigo-500 hover:bg-indigo-100"
-                                )}>
-                                    <div className="flex flex-col items-center justify-center py-3">
-                                        <Camera className="w-5 h-5 text-indigo-500 mb-1" />
-                                        <p className="text-xs text-indigo-700 font-medium">
-                                            Or upload screenshot manually
-                                        </p>
-                                    </div>
-                                    <input
-                                        type="file"
-                                        className="hidden"
-                                        accept="image/*"
-                                        disabled={aiLoading}
-                                        onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
-                                    />
-                                </label>
+                                {/* Batch Convert Button - Show for batch mode */}
+                                {selectedSlides.size > 0 && gridView ? (
+                                    <button
+                                        onClick={() => {
+                                            handleBatchConvert();
+                                            setAIPanelOpen(false);
+                                        }}
+                                        disabled={batchProcessing || !screenshotsStatus?.hasScreenshots}
+                                        className="w-full px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {batchProcessing ? (
+                                            <>
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                                Converting...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Wand2 className="w-5 h-5" />
+                                                Convert {selectedSlides.size} Slides
+                                            </>
+                                        )}
+                                    </button>
+                                ) : (
+                                    /* Manual Upload Fallback - Single slide mode */
+                                    <label className={clsx(
+                                        "flex flex-col items-center justify-center w-full h-20 border-2 border-dashed rounded-xl cursor-pointer transition-all",
+                                        aiLoading ? "border-gray-300 bg-gray-50" : "border-indigo-300 hover:border-indigo-500 hover:bg-indigo-100"
+                                    )}>
+                                        <div className="flex flex-col items-center justify-center py-3">
+                                            <Camera className="w-5 h-5 text-indigo-500 mb-1" />
+                                            <p className="text-xs text-indigo-700 font-medium">
+                                                Or upload screenshot manually
+                                            </p>
+                                        </div>
+                                        <input
+                                            type="file"
+                                            className="hidden"
+                                            accept="image/*"
+                                            disabled={aiLoading}
+                                            onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
+                                        />
+                                    </label>
+                                )}
                             </div>
 
-                            {/* Visual Correction - Secondary Action */}
-                            <div className="pt-4 border-t border-gray-100">
-                                <h4 className="text-xs font-black text-gray-400 uppercase mb-3 tracking-widest">Quick Fix (OCR Correction)</h4>
-                                <p className="text-xs text-gray-500 mb-3">Fix minor extraction errors without changing structure.</p>
-                                <label className="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all">
-                                    <div className="flex flex-col items-center justify-center py-3">
-                                        <Camera className="w-5 h-5 text-gray-400 mb-1" />
-                                        <p className="text-xs text-gray-500 font-medium">Upload for Quick Fix</p>
-                                    </div>
-                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleScreenshotFix(e.target.files[0])} />
-                                </label>
-                            </div>
+                            {/* Visual Correction - Secondary Action (Single slide only) */}
+                            {!(selectedSlides.size > 0 && gridView) && (
+                                <div className="pt-4 border-t border-gray-100">
+                                    <h4 className="text-xs font-black text-gray-400 uppercase mb-3 tracking-widest">Quick Fix (OCR Correction)</h4>
+                                    <p className="text-xs text-gray-500 mb-3">Fix minor extraction errors without changing structure.</p>
+                                    <label className="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all">
+                                        <div className="flex flex-col items-center justify-center py-3">
+                                            <Camera className="w-5 h-5 text-gray-400 mb-1" />
+                                            <p className="text-xs text-gray-500 font-medium">Upload for Quick Fix</p>
+                                        </div>
+                                        <input type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleScreenshotFix(e.target.files[0])} />
+                                    </label>
+                                </div>
+                            )}
                         </>
                     )}
                 </div>
@@ -1403,6 +1591,20 @@ Include media: ${includeMediaInConversion ? 'Yes' : 'No'}`}
                     setPendingAITitle(undefined);
                 }}
             />
+
+            {/* Batch Preview Panel */}
+            {showBatchPanel && (
+                <BatchPreviewPanel
+                    results={batchResults}
+                    isProcessing={batchProcessing}
+                    onAccept={handleBatchAccept}
+                    onReject={handleBatchReject}
+                    onAcceptAll={handleBatchAcceptAll}
+                    onRejectAll={handleBatchRejectAll}
+                    onClose={closeBatchPanel}
+                    conversionId={conversionId}
+                />
+            )}
         </div>
     );
 };

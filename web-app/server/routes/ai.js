@@ -50,6 +50,8 @@ router.post('/ai/convert', memUpload.single('screenshot'), async (req, res) => {
         const includeMedia = req.body.includeMedia === 'true';
         const conversionId = req.body.conversionId;
         const additionalPrompt = req.body.additionalPrompt || '';
+        const preserveVisuals = req.body.preserveVisuals === 'true';
+        const generateImages = req.body.generateImages === 'true';
 
         // Load media files if requested
         let mediaFiles = [];
@@ -83,7 +85,10 @@ router.post('/ai/convert', memUpload.single('screenshot'), async (req, res) => {
             userKey,
             modelName,
             mediaFiles,
-            additionalPrompt
+            additionalPrompt,
+            preserveVisuals,
+            generateImages,
+            conversionId ? path.join(getStorageDir(), conversionId) : null
         );
 
         res.json({ semanticContent });

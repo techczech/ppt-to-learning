@@ -41,6 +41,7 @@ const AVAILABLE_MODELS = {
 };
 
 const DEFAULT_MODEL = "gemini-3-flash-preview";
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 function getModel(userKey, modelName = DEFAULT_MODEL) {
     const key = userKey || process.env.GEMINI_API_KEY;
@@ -168,6 +169,40 @@ CRITICAL: Preserve ALL text from the slide in the original language. Do not tran
 Keep responses concise - focus on the actual slide content, not lengthy descriptions.
 `;
 
+// Additional instructions when "Preserve visual patterns" is enabled
+const VISUAL_PATTERN_INSTRUCTIONS = `
+
+VISUAL PATTERN REPRODUCTION (REQUIRED):
+In addition to semantic conversion, you MUST reproduce any visual patterns visible in the screenshot:
+- If there are icon sequences or patterns (like repeated symbols with variations), recreate them
+- Use emoji or Unicode symbols to represent visual elements: ● ○ ◆ ◇ ■ □ ▶ ▷ 🔴 ⚪ 🟢 ⬛ ⬜
+- Preserve the visual rhythm and spacing of patterns
+- Include a "visual_pattern" block type to show the pattern
+
+Example - for a rhythm pattern with large/small drums:
+{
+  "type": "visual_pattern",
+  "description": "Stress pattern visualization",
+  "rows": [
+    "🔴 ⚪ 🔴 ⚪ 🔴 ⚪ 🔴",
+    "🔴 ⚪ ⚪ ⚪ 🔴 ⚪ ⚪ ⚪ 🔴 ⚪ ⚪ ⚪ 🔴"
+  ],
+  "legend": "🔴 = stressed/large, ⚪ = unstressed/small",
+  "labels": ["Pattern 1: Simple", "Pattern 2: Compressed"]
+}
+
+Visual pattern output format:
+{
+  "type": "visual_pattern",
+  "description": "what the pattern represents",
+  "rows": ["row 1 symbols", "row 2 symbols"],  // each row is a string of symbols
+  "legend": "symbol meanings",
+  "labels": ["label for row 1", "label for row 2"]  // optional labels
+}
+
+IMPORTANT: Look at the screenshot carefully. If you see repeated visual elements forming a pattern, you MUST include a visual_pattern block to reproduce it.
+`;
+
 /**
  * Extract JSON from model response, handling markdown fences and edge cases.
  */
@@ -195,6 +230,72 @@ function extractJSON(text) {
     }
 
     throw new Error('Could not parse response as JSON. The model may have returned invalid output. Try a different model.');
+}
+
+/**
+ * Generate an alternative image based on an existing image and context.
+ * Uses the gemini-3-pro-image-preview model for image generation.
+ * @param {Buffer} imageBuffer - Original image buffer
+ * @param {string} mimeType - Image MIME type
+ * @param {string} context - Context about what the image should represent
+ * @param {string} userKey - Optional Gemini API key
+ * @returns {Promise<{buffer: Buffer, mimeType: string} | null>} Generated image or null if failed
+ */
+async function generateAlternativeImage(imageBuffer, mimeType, context, userKey) {
+    const key = userKey || process.env.GEMINI_API_KEY;
+    if (!key) throw new Error("No Gemini API Key provided.");
+
+    const genAI = new GoogleGenerativeAI(key);
+    const model = genAI.getGenerativeModel({ model: IMAGE_MODEL });
+
+    const prompt = `Based on this image and the following context, generate an improved or alternative educational illustration.
+
+Context: ${context}
+
+Requirements:
+- Create a clear, professional image suitable for learning materials
+- Maintain the educational intent of the original
+- Use clean, simple graphics that are easy to understand
+- If the original has text, do NOT include text in the generated image`;
+
+    console.log(`[AI] Generating alternative image with context: ${context.substring(0, 100)}...`);
+
+    try {
+        const result = await withTimeout(
+            model.generateContent([
+                prompt,
+                {
+                    inlineData: {
+                        data: imageBuffer.toString('base64'),
+                        mimeType
+                    }
+                }
+            ]),
+            API_TIMEOUT_MS * 2, // Image generation may take longer
+            'Image generation'
+        );
+
+        const response = await result.response;
+
+        // Check if the response contains an image
+        if (response.candidates && response.candidates[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    console.log(`[AI] Generated image: ${part.inlineData.mimeType}`);
+                    return {
+                        buffer: Buffer.from(part.inlineData.data, 'base64'),
+                        mimeType: part.inlineData.mimeType
+                    };
+                }
+            }
+        }
+
+        console.log('[AI] No image in response');
+        return null;
+    } catch (error) {
+        console.error('[AI] Image generation failed:', error.message);
+        return null;
+    }
 }
 
 /**
@@ -290,8 +391,11 @@ async function fixWithScreenshot(screenshotBuffer, mimeType, currentJson, userKe
  * @param {string} modelName - Model to use
  * @param {Array} mediaFiles - Optional array of {path, buffer, mimeType} for slide media
  * @param {string} additionalPrompt - Optional additional instructions from user
+ * @param {boolean} preserveVisuals - Whether to preserve visual patterns
+ * @param {boolean} generateImages - Whether to generate alternative images
+ * @param {string} storageDir - Directory to save generated images
  */
-async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = [], additionalPrompt = '') {
+async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = [], additionalPrompt = '', preserveVisuals = false, generateImages = false, storageDir = null) {
     const key = userKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error("No Gemini API Key provided.");
 
@@ -325,6 +429,13 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
             '5. Match each image to its logical place in comparisons, sequences, or other semantic structures';
     }
 
+    // Build visual pattern instructions section
+    let visualInstructionsSection = '';
+    if (preserveVisuals) {
+        visualInstructionsSection = VISUAL_PATTERN_INSTRUCTIONS;
+        console.log(`[AI] Visual pattern preservation enabled`);
+    }
+
     // Build additional user instructions section
     let userInstructionsSection = '';
     if (additionalPrompt) {
@@ -334,7 +445,7 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
 
     const prompt = SEMANTIC_PROMPT
         .replace('{{RAW_EXTRACTION}}', JSON.stringify(rawExtraction.content || rawExtraction, null, 2))
-        .replace('{{IMAGE_LIST}}', imageListStr) + attachedImagesSection + userInstructionsSection;
+        .replace('{{IMAGE_LIST}}', imageListStr) + visualInstructionsSection + attachedImagesSection + userInstructionsSection;
 
     console.log(`[AI] Prompt length: ${prompt.length} chars`);
 
@@ -374,7 +485,58 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
         console.log(`[AI] Response received, length: ${text.length} chars`);
 
         // Use lenient JSON extraction
-        return extractJSON(text);
+        const semanticContent = extractJSON(text);
+
+        // Generate alternative images if requested
+        if (generateImages && storageDir && mediaFiles.length > 0) {
+            console.log(`[AI] Generating alternative images for ${mediaFiles.length} media files...`);
+            const fs = require('fs');
+            const path = require('path');
+
+            // Create generated images directory
+            const generatedDir = path.join(storageDir, 'generated');
+            if (!fs.existsSync(generatedDir)) {
+                fs.mkdirSync(generatedDir, { recursive: true });
+            }
+
+            // Build context from semantic content
+            const context = `Slide: ${semanticContent.title || 'Untitled'}. ${semanticContent.summary || ''}`;
+
+            for (let i = 0; i < mediaFiles.length; i++) {
+                const media = mediaFiles[i];
+                try {
+                    const generated = await generateAlternativeImage(
+                        media.buffer,
+                        media.mimeType,
+                        context,
+                        userKey
+                    );
+
+                    if (generated) {
+                        // Save generated image
+                        const ext = generated.mimeType.includes('png') ? '.png' : '.jpg';
+                        const filename = `generated_${i + 1}${ext}`;
+                        const filepath = path.join(generatedDir, filename);
+                        fs.writeFileSync(filepath, generated.buffer);
+                        console.log(`[AI] Saved generated image: ${filepath}`);
+
+                        // Add to semantic content as new image block
+                        if (!semanticContent.generatedImages) {
+                            semanticContent.generatedImages = [];
+                        }
+                        semanticContent.generatedImages.push({
+                            original: media.path,
+                            generated: `generated/${filename}`,
+                            mimeType: generated.mimeType
+                        });
+                    }
+                } catch (err) {
+                    console.error(`[AI] Failed to generate alternative for ${media.path}:`, err.message);
+                }
+            }
+        }
+
+        return semanticContent;
     } catch (error) {
         console.error(`[AI] Gemini API error:`, error.message);
         if (error.message?.includes('fetch failed')) {

@@ -48,7 +48,7 @@ const normalizeListItem = (item: string | ListItemData | { text: string; icon?: 
 };
 
 export interface ContentBlock {
-    type: 'heading' | 'paragraph' | 'list' | 'image' | 'smart_art' | 'table' | 'comparison' | 'sequence' | 'text_with_visual' | 'definition' | 'link' | 'video';
+    type: 'heading' | 'paragraph' | 'list' | 'image' | 'smart_art' | 'table' | 'comparison' | 'sequence' | 'text_with_visual' | 'definition' | 'link' | 'video' | 'visual_pattern';
     title?: string;
     text?: string;
     url?: string;
@@ -70,6 +70,11 @@ export interface ContentBlock {
     term?: string;
     definition?: string;
     examples?: (string | { text: string })[];
+    // Visual pattern properties
+    pattern?: string;
+    rows?: string[];
+    legend?: string;
+    labels?: string[];
 }
 
 // --- Helpers ---
@@ -385,6 +390,34 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                                 ))}
                             </ul>
                         </div>
+                    )}
+                </div>
+            );
+        case 'visual_pattern':
+            return wrapWithDelete(
+                <div className={`${marginY} ${padding} bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl shadow-sm`}>
+                    {block.description && (
+                        <p className={`${compact ? 'text-xs' : 'text-sm'} text-amber-700 font-medium mb-3`}>{block.description}</p>
+                    )}
+                    <div className="space-y-2">
+                        {/* Handle both 'rows' array and single 'pattern' string */}
+                        {(block.rows || (block.pattern ? [block.pattern] : [])).map((row: string, ri: number) => (
+                            <div key={ri} className="flex items-center gap-3">
+                                {block.labels && block.labels[ri] && (
+                                    <span className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-amber-800 min-w-24`}>
+                                        {block.labels[ri]}:
+                                    </span>
+                                )}
+                                <div className={`flex-1 ${compact ? 'text-lg' : 'text-2xl'} tracking-wider font-mono bg-white px-4 py-2 rounded-lg border border-amber-100`}>
+                                    {row}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    {block.legend && (
+                        <p className={`${compact ? 'text-[10px]' : 'text-xs'} text-amber-600 mt-3 italic`}>
+                            {block.legend}
+                        </p>
                     )}
                 </div>
             );
