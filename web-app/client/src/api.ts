@@ -485,11 +485,34 @@ export const fixWithScreenshot = async (screenshot: File, currentJson: any, prom
     return res.data;
 };
 
+// Context slide metadata for AI conversion
+export interface ContextSlideInfo {
+    order: number;
+    title: string;
+    contentSummary: string;
+}
+
+// Context screenshot with position info
+export interface ContextScreenshot {
+    position: 'before' | 'after';
+    order: number;
+    file: File;
+}
+
 // Semantic Conversion - Transform screenshot + raw extraction into semantic content
 export const semanticConvert = async (
     screenshot: File,
     rawExtraction: any,
-    options?: { conversionId?: string; includeMedia?: boolean; additionalPrompt?: string; preserveVisuals?: boolean; generateImages?: boolean }
+    options?: {
+        conversionId?: string;
+        includeMedia?: boolean;
+        additionalPrompt?: string;
+        preserveVisuals?: boolean;
+        generateImages?: boolean;
+        useLucideIcons?: boolean;
+        contextSlides?: { before: ContextSlideInfo[]; after: ContextSlideInfo[] };
+        contextScreenshots?: ContextScreenshot[];
+    }
 ) => {
     const formData = new FormData();
     formData.append('screenshot', screenshot);
@@ -508,6 +531,23 @@ export const semanticConvert = async (
     }
     if (options?.generateImages) {
         formData.append('generateImages', 'true');
+    }
+    if (options?.useLucideIcons) {
+        formData.append('useLucideIcons', 'true');
+    }
+    // Add context slides metadata
+    if (options?.contextSlides && (options.contextSlides.before.length > 0 || options.contextSlides.after.length > 0)) {
+        formData.append('contextSlides', JSON.stringify(options.contextSlides));
+    }
+    // Add context screenshots
+    if (options?.contextScreenshots && options.contextScreenshots.length > 0) {
+        for (const ctx of options.contextScreenshots) {
+            formData.append('contextScreenshots', ctx.file, `${ctx.position}_${ctx.order}.png`);
+        }
+        // Also send metadata about position/order
+        formData.append('contextScreenshotsMeta', JSON.stringify(
+            options.contextScreenshots.map(c => ({ position: c.position, order: c.order }))
+        ));
     }
     const res = await api.post(`/ai/convert`, formData);
     return res.data;

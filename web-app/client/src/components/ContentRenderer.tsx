@@ -2,6 +2,7 @@ import React from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import clsx from 'clsx';
 import { getMediaUrl } from '../api';
+import { LucideIcon, isLucideIcon, getLucideIconName } from './LucideIcon';
 
 // --- Types ---
 
@@ -17,6 +18,7 @@ export interface SmartArtNode {
 export interface ComparisonGroup {
     label: string;
     visual_cue?: string;
+    icon?: string;  // Icon for the group itself
     items: (string | { text: string; icon?: string })[];
 }
 
@@ -25,10 +27,16 @@ const getItemText = (item: string | { text: string; icon?: string }): string => 
     return typeof item === 'string' ? item : item.text;
 };
 
+// Helper to get icon from a string or object item
+const getItemIcon = (item: string | { text: string; icon?: string }): string | undefined => {
+    return typeof item === 'string' ? undefined : item.icon;
+};
+
 export interface SequenceStep {
     step: number;
     text: string;
     detail?: string;
+    icon?: string;
 }
 
 export interface ListItemData {
@@ -85,6 +93,30 @@ export const getYouTubeId = (url: string): string | null => {
     return match ? match[1] : null;
 };
 
+// Helper component for rendering either Lucide icons or image icons
+const IconDisplay: React.FC<{
+    icon: string;
+    conversionId: string;
+    className?: string;
+    size?: number;
+    alt?: string;
+    title?: string;
+}> = ({ icon, conversionId, className = "w-5 h-5 object-contain", size = 20, alt = "", title }) => {
+    if (isLucideIcon(icon)) {
+        const iconName = getLucideIconName(icon);
+        return <LucideIcon name={iconName} className={className} size={size} />;
+    }
+    // Fallback to image
+    return (
+        <img
+            src={getMediaUrl(conversionId, icon)}
+            alt={alt}
+            title={title}
+            className={className}
+        />
+    );
+};
+
 // --- Components ---
 
 const SmartArtTree: React.FC<{ nodes: SmartArtNode[], conversionId: string }> = ({ nodes, conversionId }) => {
@@ -95,11 +127,13 @@ const SmartArtTree: React.FC<{ nodes: SmartArtNode[], conversionId: string }> = 
                 <li key={node.id} className="text-gray-800">
                     <div className="font-medium flex items-center">
                         {node.icon && (
-                            <img
-                                src={getMediaUrl(conversionId, node.icon)}
+                            <IconDisplay
+                                icon={node.icon}
+                                conversionId={conversionId}
                                 alt={node.icon_alt || "Icon"}
                                 title={node.icon_alt || undefined}
                                 className="w-10 h-10 mr-3 object-contain inline-block bg-white p-1 rounded border border-gray-100 shadow-sm"
+                                size={40}
                             />
                         )}
                         <span>{node.text || <span className="text-gray-400 italic">(Group)</span>}</span>
@@ -232,10 +266,11 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                         return (
                             <li key={i} className="flex items-start gap-2">
                                 {item.icon && (
-                                    <img
-                                        src={getMediaUrl(conversionId, item.icon)}
-                                        alt=""
+                                    <IconDisplay
+                                        icon={item.icon}
+                                        conversionId={conversionId}
                                         className="w-5 h-5 object-contain flex-shrink-0 mt-0.5"
+                                        size={20}
                                     />
                                 )}
                                 <span className="flex-1">
@@ -321,14 +356,37 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                     <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(block.groups?.length || 1, compact ? 2 : 4)}, 1fr)` }}>
                         {block.groups?.map((group, gi) => (
                             <div key={gi} className="bg-white rounded-lg p-4 shadow-sm border border-indigo-100">
-                                <h4 className={`font-bold text-indigo-900 mb-1 ${compact ? 'text-sm' : ''}`}>{group.label}</h4>
+                                <h4 className={`font-bold text-indigo-900 mb-1 flex items-center gap-2 ${compact ? 'text-sm' : ''}`}>
+                                    {group.icon && (
+                                        <IconDisplay
+                                            icon={group.icon}
+                                            conversionId={conversionId}
+                                            className="w-5 h-5 text-indigo-600"
+                                            size={20}
+                                        />
+                                    )}
+                                    {group.label}
+                                </h4>
                                 {group.visual_cue && !compact && (
                                     <p className="text-xs text-indigo-500 mb-3 italic">{group.visual_cue}</p>
                                 )}
                                 <ul className="space-y-2">
-                                    {group.items.slice(0, compact ? 3 : undefined).map((item, ii) => (
-                                        <li key={ii} className={`text-gray-700 pl-3 border-l-2 border-indigo-300 ${compact ? 'text-xs' : ''}`}>{getItemText(item)}</li>
-                                    ))}
+                                    {group.items.slice(0, compact ? 3 : undefined).map((item, ii) => {
+                                        const itemIcon = getItemIcon(item);
+                                        return (
+                                            <li key={ii} className={`text-gray-700 pl-3 border-l-2 border-indigo-300 flex items-start gap-2 ${compact ? 'text-xs' : ''}`}>
+                                                {itemIcon && (
+                                                    <IconDisplay
+                                                        icon={itemIcon}
+                                                        conversionId={conversionId}
+                                                        className="w-4 h-4 text-indigo-500 flex-shrink-0 mt-0.5"
+                                                        size={16}
+                                                    />
+                                                )}
+                                                <span>{getItemText(item)}</span>
+                                            </li>
+                                        );
+                                    })}
                                     {compact && group.items.length > 3 && (
                                         <li className="text-xs text-indigo-400">+{group.items.length - 3} more</li>
                                     )}
@@ -347,9 +405,20 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                     <div className="space-y-3">
                         {block.steps?.slice(0, compact ? 3 : undefined).map((step, si) => (
                             <div key={si} className="flex items-start gap-4">
-                                <div className={`flex-shrink-0 ${compact ? 'w-6 h-6 text-xs' : 'w-8 h-8 text-sm'} rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold`}>
-                                    {step.step}
-                                </div>
+                                {step.icon ? (
+                                    <div className={`flex-shrink-0 ${compact ? 'w-6 h-6' : 'w-8 h-8'} rounded-full bg-emerald-100 flex items-center justify-center`}>
+                                        <IconDisplay
+                                            icon={step.icon}
+                                            conversionId={conversionId}
+                                            className="text-emerald-600"
+                                            size={compact ? 16 : 20}
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className={`flex-shrink-0 ${compact ? 'w-6 h-6 text-xs' : 'w-8 h-8 text-sm'} rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold`}>
+                                        {step.step}
+                                    </div>
+                                )}
                                 <div className="flex-1 pt-1">
                                     <p className={`font-medium text-gray-900 ${compact ? 'text-sm' : ''}`}>{step.text}</p>
                                     {step.detail && !compact && <p className="text-sm text-gray-600 mt-1">{step.detail}</p>}

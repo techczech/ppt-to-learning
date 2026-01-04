@@ -7,7 +7,7 @@ import {
     getScreenshotsStatus, generateScreenshots, getScreenshotUrl,
     getManagedPresentations
 } from '../api';
-import type { ScreenshotsStatus, ManagedPresentation } from '../api';
+import type { ScreenshotsStatus, ManagedPresentation, ContextScreenshot } from '../api';
 import {
     ChevronLeft, ChevronRight, ChevronDown, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
@@ -76,6 +76,9 @@ export const ViewerPage: React.FC = () => {
     const [includeMediaInConversion, setIncludeMediaInConversion] = useState(false);
     const [preserveVisuals, setPreserveVisuals] = useState(false);
     const [generateAltImages, setGenerateAltImages] = useState(false);
+    const [useLucideIcons, setUseLucideIcons] = useState(false);
+    const [contextSlidesBefore, setContextSlidesBefore] = useState(0);
+    const [contextSlidesAfter, setContextSlidesAfter] = useState(0);
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [showPromptEditor, setShowPromptEditor] = useState(false);
 
@@ -115,6 +118,58 @@ export const ViewerPage: React.FC = () => {
         if (!data) return [];
         return data.sections.flatMap(s => s.slides);
     }, [data]);
+
+    // Helper to create text summary of slide content for context
+    const summarizeContent = (content: ContentBlock[]): string => {
+        if (!content || content.length === 0) return '(empty)';
+        return content
+            .slice(0, 5) // Take first 5 blocks
+            .map(block => {
+                if (block.type === 'heading') return block.text;
+                if (block.type === 'paragraph') return block.text?.substring(0, 100);
+                if (block.type === 'list') return `List: ${block.items?.length || 0} items`;
+                if (block.type === 'comparison') return `Comparison: ${block.groups?.length || 0} groups`;
+                if (block.type === 'sequence') return `Sequence: ${block.steps?.length || 0} steps`;
+                return block.type;
+            })
+            .filter(Boolean)
+            .join(' | ')
+            .substring(0, 200);
+    };
+
+    // Helper to collect context slides metadata
+    const getContextSlides = (slideIdx: number) => {
+        const contextBefore: Array<{ order: number; title: string; contentSummary: string }> = [];
+        const contextAfter: Array<{ order: number; title: string; contentSummary: string }> = [];
+
+        // Collect slides before
+        for (let i = 1; i <= contextSlidesBefore; i++) {
+            const idx = slideIdx - i;
+            if (idx >= 0 && allSlides[idx]) {
+                const slide = allSlides[idx];
+                contextBefore.unshift({
+                    order: slide.order,
+                    title: slide.title || `Slide ${slide.order}`,
+                    contentSummary: summarizeContent(slide.content)
+                });
+            }
+        }
+
+        // Collect slides after
+        for (let i = 1; i <= contextSlidesAfter; i++) {
+            const idx = slideIdx + i;
+            if (idx < allSlides.length && allSlides[idx]) {
+                const slide = allSlides[idx];
+                contextAfter.push({
+                    order: slide.order,
+                    title: slide.title || `Slide ${slide.order}`,
+                    contentSummary: summarizeContent(slide.content)
+                });
+            }
+        }
+
+        return { contextBefore, contextAfter };
+    };
 
     // Display name: use originalName without extension, fallback to metadata.id for legacy
     const displayName = useMemo(() => {
@@ -321,11 +376,52 @@ export const ViewerPage: React.FC = () => {
                 const blob = await response.blob();
                 const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
 
+                // Collect context slides metadata and screenshots
+                const { contextBefore, contextAfter } = getContextSlides(slideIdx);
+                const contextScreenshots: ContextScreenshot[] = [];
+
+                // Fetch context screenshots in parallel
+                const contextFetches: Promise<void>[] = [];
+                for (const ctx of contextBefore) {
+                    contextFetches.push(
+                        fetch(getScreenshotUrl(id!, ctx.order))
+                            .then(res => res.blob())
+                            .then(ctxBlob => {
+                                contextScreenshots.push({
+                                    position: 'before',
+                                    order: ctx.order,
+                                    file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
+                                });
+                            })
+                            .catch(() => { /* skip if unavailable */ })
+                    );
+                }
+                for (const ctx of contextAfter) {
+                    contextFetches.push(
+                        fetch(getScreenshotUrl(id!, ctx.order))
+                            .then(res => res.blob())
+                            .then(ctxBlob => {
+                                contextScreenshots.push({
+                                    position: 'after',
+                                    order: ctx.order,
+                                    file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
+                                });
+                            })
+                            .catch(() => { /* skip if unavailable */ })
+                    );
+                }
+                await Promise.all(contextFetches);
+
                 const res = await semanticConvert(file, slide, {
                     conversionId: id,
                     includeMedia: includeMediaInConversion,
                     preserveVisuals,
-                    generateImages: generateAltImages
+                    generateImages: generateAltImages,
+                    useLucideIcons,
+                    contextSlides: (contextBefore.length > 0 || contextAfter.length > 0)
+                        ? { before: contextBefore, after: contextAfter }
+                        : undefined,
+                    contextScreenshots: contextScreenshots.length > 0 ? contextScreenshots : undefined
                 });
 
                 // Update to 'ready' with AI content (don't auto-apply)
@@ -547,13 +643,55 @@ export const ViewerPage: React.FC = () => {
                 throw new Error('No image available');
             }
 
+            // Collect context slides metadata and screenshots
+            setAIStatus('Collecting context slides...');
+            const { contextBefore, contextAfter } = getContextSlides(currentSlideIndex);
+            const contextScreenshots: ContextScreenshot[] = [];
+
+            // Fetch context screenshots in parallel
+            const contextFetches: Promise<void>[] = [];
+            for (const ctx of contextBefore) {
+                contextFetches.push(
+                    fetch(getScreenshotUrl(id!, ctx.order))
+                        .then(res => res.blob())
+                        .then(ctxBlob => {
+                            contextScreenshots.push({
+                                position: 'before',
+                                order: ctx.order,
+                                file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
+                            });
+                        })
+                        .catch(() => { /* skip if unavailable */ })
+                );
+            }
+            for (const ctx of contextAfter) {
+                contextFetches.push(
+                    fetch(getScreenshotUrl(id!, ctx.order))
+                        .then(res => res.blob())
+                        .then(ctxBlob => {
+                            contextScreenshots.push({
+                                position: 'after',
+                                order: ctx.order,
+                                file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
+                            });
+                        })
+                        .catch(() => { /* skip if unavailable */ })
+                );
+            }
+            await Promise.all(contextFetches);
+
             setAIStatus('Sending to Gemini API...');
             const res = await semanticConvert(fileToSend, currentSlide, {
                 conversionId: id,
                 includeMedia: includeMediaInConversion,
                 preserveVisuals,
                 generateImages: generateAltImages,
-                additionalPrompt: additionalPrompt.trim() || undefined
+                useLucideIcons,
+                additionalPrompt: additionalPrompt.trim() || undefined,
+                contextSlides: (contextBefore.length > 0 || contextAfter.length > 0)
+                    ? { before: contextBefore, after: contextAfter }
+                    : undefined,
+                contextScreenshots: contextScreenshots.length > 0 ? contextScreenshots : undefined
             });
 
             setAIStatus('Processing response...');
@@ -1226,6 +1364,54 @@ export const ViewerPage: React.FC = () => {
                                         </div>
                                     </label>
 
+                                    {/* Use Lucide Icons */}
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={useLucideIcons}
+                                            onChange={(e) => setUseLucideIcons(e.target.checked)}
+                                            className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-medium text-gray-700">Use Lucide icons</span>
+                                            <p className="text-[10px] text-gray-500">Add/replace icons with React Lucide library icons</p>
+                                        </div>
+                                    </label>
+
+                                    {/* Context Slides */}
+                                    <div className="space-y-1">
+                                        <p className="text-xs font-medium text-gray-700">Context slides</p>
+                                        <div className="flex gap-4">
+                                            <label className="flex items-center gap-1 text-xs">
+                                                <span className="text-gray-600">Before:</span>
+                                                <select
+                                                    value={contextSlidesBefore}
+                                                    onChange={(e) => setContextSlidesBefore(Number(e.target.value))}
+                                                    className="text-xs border border-gray-200 rounded px-1.5 py-0.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                                >
+                                                    <option value={0}>0</option>
+                                                    <option value={1}>1</option>
+                                                    <option value={2}>2</option>
+                                                    <option value={3}>3</option>
+                                                </select>
+                                            </label>
+                                            <label className="flex items-center gap-1 text-xs">
+                                                <span className="text-gray-600">After:</span>
+                                                <select
+                                                    value={contextSlidesAfter}
+                                                    onChange={(e) => setContextSlidesAfter(Number(e.target.value))}
+                                                    className="text-xs border border-gray-200 rounded px-1.5 py-0.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                                >
+                                                    <option value={0}>0</option>
+                                                    <option value={1}>1</option>
+                                                    <option value={2}>2</option>
+                                                    <option value={3}>3</option>
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500">Include surrounding slides for context (helps with progressive slides)</p>
+                                    </div>
+
                                     {/* Generate Alternative Images */}
                                     <label className="flex items-start gap-2 cursor-pointer p-2 -mx-2 bg-amber-50/50 rounded-lg border border-amber-200">
                                         <input
@@ -1273,6 +1459,9 @@ ${JSON.stringify(currentSlide, null, 2)}
 === OPTIONS ===
 Include media files: ${includeMediaInConversion ? 'Yes' : 'No'}
 Preserve visual patterns: ${preserveVisuals ? 'Yes' : 'No'}
+Generate alternative images: ${generateAltImages ? 'Yes' : 'No'}
+Use Lucide icons: ${useLucideIcons ? 'Yes' : 'No'}
+Context slides: ${contextSlidesBefore} before, ${contextSlidesAfter} after
 ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : ''}`}
                                             </pre>
                                         </div>
@@ -1417,6 +1606,54 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                     </div>
                                 </label>
 
+                                {/* Use Lucide Icons Option */}
+                                <label className="flex items-center gap-2 mb-2 p-2 bg-indigo-50/50 rounded-lg cursor-pointer hover:bg-indigo-100/50">
+                                    <input
+                                        type="checkbox"
+                                        checked={useLucideIcons}
+                                        onChange={(e) => setUseLucideIcons(e.target.checked)}
+                                        className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div>
+                                        <span className="text-xs font-medium text-indigo-800">Use Lucide icons</span>
+                                        <p className="text-[10px] text-indigo-600">Add/replace icons with React Lucide library icons</p>
+                                    </div>
+                                </label>
+
+                                {/* Context Slides Option */}
+                                <div className="mb-2 p-2 bg-indigo-50/50 rounded-lg">
+                                    <p className="text-xs font-medium text-indigo-800 mb-1">Context slides</p>
+                                    <div className="flex gap-4">
+                                        <label className="flex items-center gap-1 text-xs">
+                                            <span className="text-indigo-600">Before:</span>
+                                            <select
+                                                value={contextSlidesBefore}
+                                                onChange={(e) => setContextSlidesBefore(Number(e.target.value))}
+                                                className="text-xs border border-indigo-200 rounded px-1.5 py-0.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            >
+                                                <option value={0}>0</option>
+                                                <option value={1}>1</option>
+                                                <option value={2}>2</option>
+                                                <option value={3}>3</option>
+                                            </select>
+                                        </label>
+                                        <label className="flex items-center gap-1 text-xs">
+                                            <span className="text-indigo-600">After:</span>
+                                            <select
+                                                value={contextSlidesAfter}
+                                                onChange={(e) => setContextSlidesAfter(Number(e.target.value))}
+                                                className="text-xs border border-indigo-200 rounded px-1.5 py-0.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            >
+                                                <option value={0}>0</option>
+                                                <option value={1}>1</option>
+                                                <option value={2}>2</option>
+                                                <option value={3}>3</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <p className="text-[10px] text-indigo-600 mt-1">Include surrounding slides for context</p>
+                                </div>
+
                                 {/* Generate Alternative Images Option */}
                                 <label className="flex items-start gap-2 mb-4 p-2 bg-amber-50 rounded-lg cursor-pointer hover:bg-amber-100 border border-amber-200">
                                     <input
@@ -1450,10 +1687,17 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                             <div>
                                                 <p className="text-[10px] text-gray-500 mb-1 font-medium">Context being sent:</p>
                                                 <pre className="text-[9px] bg-gray-900 text-green-400 p-2 rounded-lg overflow-auto max-h-24 font-mono">
-{`Slide ${currentSlide?.order}: ${currentSlide?.title || 'Untitled'}
+{`=== SLIDE INFO ===
+Slide ${currentSlide?.order}: ${currentSlide?.title || 'Untitled'}
 Content blocks: ${currentSlide?.content?.length || 0}
 Images: ${currentSlide?.content?.filter(b => b.type === 'image').length || 0}
-Include media: ${includeMediaInConversion ? 'Yes' : 'No'}`}
+
+=== OPTIONS ===
+Include media files: ${includeMediaInConversion ? 'Yes' : 'No'}
+Preserve visual patterns: ${preserveVisuals ? 'Yes' : 'No'}
+Generate alternative images: ${generateAltImages ? 'Yes' : 'No'}
+Use Lucide icons: ${useLucideIcons ? 'Yes' : 'No'}
+Context slides: ${contextSlidesBefore} before, ${contextSlidesAfter} after`}
                                                 </pre>
                                             </div>
                                             {/* Additional Instructions */}

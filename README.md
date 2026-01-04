@@ -20,6 +20,8 @@ Transform PowerPoint presentations into interactive, semantic web-based learning
 - **Preview & Review**: Side-by-side comparison before accepting AI changes
 - **Visual Pattern Preservation**: Reproduce icon sequences with emoji/Unicode symbols
 - **AI Image Generation**: Generate alternative images using Gemini's image model (optional, costs extra)
+- **Lucide Icons**: AI can add or replace icons with React Lucide icons for lists, comparisons, sequences, and SmartArt
+- **Context Slides**: Include surrounding slides (1-3 before/after) as context for better AI understanding of progressive content
 - **Custom Prompts**: Add slide-specific instructions to guide AI conversion
 
 ### Web App Features
@@ -292,6 +294,12 @@ Screenshots require LibreOffice and Poppler. If not installed, the app will stil
 - Try a different model in Settings
 
 ## Changelog
+
+### v0.5 (2025-01-04)
+- **Lucide Icons Integration**: AI can now add or replace icons with React Lucide icons (~80 categorized icons available)
+- **Context Slides**: Include 1-3 surrounding slides (before/after) as context for AI conversion to understand progressive content and slide relationships
+- **Enhanced Context Preview**: Full visibility into all conversion options being sent to AI (media, visuals, icons, context slides)
+- **Dynamic Icon Rendering**: New LucideIcon component for rendering `lucide:IconName` format icons alongside image-based icons
 
 ### v0.4 (2025-12-30)
 - **Unified Gemini Conversion**: Single "Convert with Gemini" button works for both single slides and batch selections

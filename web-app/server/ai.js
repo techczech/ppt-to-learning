@@ -203,6 +203,91 @@ Visual pattern output format:
 IMPORTANT: Look at the screenshot carefully. If you see repeated visual elements forming a pattern, you MUST include a visual_pattern block to reproduce it.
 `;
 
+// Lucide icons catalog for AI to use when generating icons
+const LUCIDE_ICONS_CATALOG = `
+AVAILABLE LUCIDE ICONS:
+Use these icons by specifying "lucide:IconName" format in the icon field.
+
+CATEGORIES & ICONS:
+- Actions: Check, X, Plus, Minus, Edit, Pencil, Trash2, Save, Download, Upload, RefreshCw, Search, Eye, EyeOff, Copy, Clipboard
+- Arrows: ArrowRight, ArrowLeft, ArrowUp, ArrowDown, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ArrowRightCircle, MoveRight, CornerDownRight
+- Communication: Mail, MessageCircle, MessageSquare, Phone, Send, Bell, Megaphone, AtSign, Share2
+- Files: File, FileText, Folder, FolderOpen, Clipboard, Book, BookOpen, FileCheck, FileX, FilePlus, Archive
+- Media: Image, Camera, Video, Music, Play, Pause, Volume2, Mic, Film, Headphones
+- People: User, Users, UserPlus, UserCheck, UserX, Heart, ThumbsUp, ThumbsDown, Smile, Frown, Meh
+- Objects: Home, Building, Building2, Car, Plane, Globe, Globe2, Map, MapPin, Calendar, Clock, Watch, Key, Lock, Unlock, Gift, ShoppingCart, ShoppingBag
+- Shapes: Circle, Square, Triangle, Star, Hexagon, Pentagon, Diamond, Octagon
+- Status: AlertCircle, AlertTriangle, Info, HelpCircle, CheckCircle, CheckCircle2, XCircle, XOctagon, Loader, Loader2, Ban
+- Nature: Sun, Moon, Cloud, CloudRain, Zap, Flame, Leaf, TreeDeciduous, TreePine, Flower, Flower2, Bug, Bird
+- Technology: Laptop, Smartphone, Monitor, Cpu, Database, Server, Wifi, Bluetooth, Code, Terminal, HardDrive, Printer, Mouse, Keyboard
+- Money: DollarSign, CreditCard, Wallet, PiggyBank, Receipt, Banknote, Coins, TrendingUp, TrendingDown, BarChart, PieChart
+- Education: GraduationCap, BookOpen, Lightbulb, Pencil, PenTool, Ruler, Calculator, School, Library, Brain
+- Sports: Trophy, Medal, Target, Dumbbell, Bike, Mountain
+- Science: Beaker, FlaskConical, Atom, Microscope, Dna, TestTube, Stethoscope
+- Food: Coffee, Pizza, Apple, Cookie, Utensils, UtensilsCrossed, Wine, Beer, Cake, IceCream
+- Medical: Heart, HeartPulse, Activity, Stethoscope, Pill, Syringe, Thermometer, Ambulance, Hospital
+- Tools: Wrench, Hammer, Scissors, PaintBrush, Brush, Ruler, Settings, Cog, SlidersHorizontal
+- Misc: Flag, Bookmark, Tag, Tags, Paperclip, Link, Link2, ExternalLink, QrCode, Fingerprint, Shield, ShieldCheck
+`;
+
+const LUCIDE_ICON_INSTRUCTIONS = `
+
+LUCIDE ICONS (REQUIRED):
+You MUST add appropriate Lucide icons to enhance the semantic content:
+1. For LIST items: Add an icon field using "lucide:IconName" format based on the item's meaning
+2. For COMPARISON groups: Add an icon to each group that represents its category
+3. For SEQUENCE steps: Add an icon that represents each action or concept
+4. Choose icons that semantically match the content meaning
+
+${LUCIDE_ICONS_CATALOG}
+
+ICON FORMAT:
+Use the format "lucide:IconName" exactly, for example:
+- "icon": "lucide:Check" for checkmarks/success
+- "icon": "lucide:AlertTriangle" for warnings
+- "icon": "lucide:BookOpen" for educational content
+- "icon": "lucide:ArrowRight" for progression/next steps
+
+ICON SELECTION GUIDELINES:
+- Match the icon to the semantic meaning of the content
+- Use consistent icons for similar concepts within the same slide
+- Prefer simple, recognizable icons over obscure ones
+- If an existing image icon path is present and meaningful, you can either:
+  a) Keep the original image path (like "media/icon.png")
+  b) Replace it with "lucide:IconName" if a Lucide icon better represents the concept
+- Add icons even to items that don't have them, when appropriate
+
+EXAMPLES:
+- Benefits list → use "lucide:CheckCircle" or "lucide:ThumbsUp"
+- Warnings/risks → use "lucide:AlertTriangle" or "lucide:AlertCircle"
+- Steps in a process → use "lucide:ArrowRight", "lucide:Play", or contextual icons
+- Categories being compared → use icons that represent each category's concept
+`;
+
+// Context slides prompt template - explains surrounding slides to the AI
+const CONTEXT_SLIDES_PROMPT = `
+
+CONTEXT SLIDES:
+You are provided with context from surrounding slides to help understand relationships and narrative flow.
+This slide is part of a sequence - it does NOT stand alone.
+
+{{CONTEXT_BEFORE}}
+
+>>> CURRENT SLIDE (the one you are converting) <<<
+
+{{CONTEXT_AFTER}}
+
+Use this context to:
+1. Understand how this slide relates to previous topics
+2. Recognize continuation of themes, definitions, or examples
+3. Identify if this slide is a conclusion, expansion, or introduction of a topic
+4. Maintain consistency in terminology and concepts
+5. Understand progressive disclosure patterns (e.g., slides that build on each other)
+
+CRITICAL: Only output content for the CURRENT SLIDE being converted, not the context slides.
+The context is just to inform your understanding of relationships and flow.
+`;
+
 /**
  * Extract JSON from model response, handling markdown fences and edge cases.
  */
@@ -394,8 +479,11 @@ async function fixWithScreenshot(screenshotBuffer, mimeType, currentJson, userKe
  * @param {boolean} preserveVisuals - Whether to preserve visual patterns
  * @param {boolean} generateImages - Whether to generate alternative images
  * @param {string} storageDir - Directory to save generated images
+ * @param {boolean} useLucideIcons - Whether to add Lucide icons to content
+ * @param {Object} contextSlides - Context slides metadata {before: [], after: []}
+ * @param {Array} contextScreenshots - Array of {position, order, buffer, mimeType} for context screenshots
  */
-async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = [], additionalPrompt = '', preserveVisuals = false, generateImages = false, storageDir = null) {
+async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKey, modelName = DEFAULT_MODEL, mediaFiles = [], additionalPrompt = '', preserveVisuals = false, generateImages = false, storageDir = null, useLucideIcons = false, contextSlides = null, contextScreenshots = []) {
     const key = userKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error("No Gemini API Key provided.");
 
@@ -436,6 +524,42 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
         console.log(`[AI] Visual pattern preservation enabled`);
     }
 
+    // Build Lucide icon instructions section
+    let lucideInstructionsSection = '';
+    if (useLucideIcons) {
+        lucideInstructionsSection = LUCIDE_ICON_INSTRUCTIONS;
+        console.log(`[AI] Lucide icon mode enabled`);
+    }
+
+    // Build context slides section
+    let contextSection = '';
+    if (contextSlides && (contextSlides.before?.length > 0 || contextSlides.after?.length > 0)) {
+        let beforeText = '';
+        let afterText = '';
+
+        if (contextSlides.before?.length > 0) {
+            beforeText = 'SLIDES BEFORE (shown earlier):\n' + contextSlides.before.map(s =>
+                `  - Slide ${s.order}: "${s.title}" - ${s.contentSummary}`
+            ).join('\n');
+        } else {
+            beforeText = '(This is the first slide or no context before)';
+        }
+
+        if (contextSlides.after?.length > 0) {
+            afterText = 'SLIDES AFTER (shown later):\n' + contextSlides.after.map(s =>
+                `  - Slide ${s.order}: "${s.title}" - ${s.contentSummary}`
+            ).join('\n');
+        } else {
+            afterText = '(This is the last slide or no context after)';
+        }
+
+        contextSection = CONTEXT_SLIDES_PROMPT
+            .replace('{{CONTEXT_BEFORE}}', beforeText)
+            .replace('{{CONTEXT_AFTER}}', afterText);
+
+        console.log(`[AI] Including context: ${contextSlides.before?.length || 0} before, ${contextSlides.after?.length || 0} after`);
+    }
+
     // Build additional user instructions section
     let userInstructionsSection = '';
     if (additionalPrompt) {
@@ -445,11 +569,11 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
 
     const prompt = SEMANTIC_PROMPT
         .replace('{{RAW_EXTRACTION}}', JSON.stringify(rawExtraction.content || rawExtraction, null, 2))
-        .replace('{{IMAGE_LIST}}', imageListStr) + visualInstructionsSection + attachedImagesSection + userInstructionsSection;
+        .replace('{{IMAGE_LIST}}', imageListStr) + contextSection + visualInstructionsSection + lucideInstructionsSection + attachedImagesSection + userInstructionsSection;
 
     console.log(`[AI] Prompt length: ${prompt.length} chars`);
 
-    // Build image parts array - screenshot first, then media files
+    // Build image parts array - screenshot first, then context screenshots, then media files
     const imageParts = [
         {
             inlineData: {
@@ -458,6 +582,24 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
             }
         }
     ];
+
+    // Add context screenshots (ordered: before slides first, then after slides)
+    if (contextScreenshots && contextScreenshots.length > 0) {
+        const beforeScreenshots = contextScreenshots.filter(c => c.position === 'before')
+            .sort((a, b) => a.order - b.order);
+        const afterScreenshots = contextScreenshots.filter(c => c.position === 'after')
+            .sort((a, b) => a.order - b.order);
+
+        for (const ctx of [...beforeScreenshots, ...afterScreenshots]) {
+            imageParts.push({
+                inlineData: {
+                    data: ctx.buffer.toString("base64"),
+                    mimeType: ctx.mimeType
+                }
+            });
+        }
+        console.log(`[AI] Including ${contextScreenshots.length} context screenshots in request`);
+    }
 
     // Add media files if provided
     for (const media of mediaFiles) {
