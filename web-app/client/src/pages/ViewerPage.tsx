@@ -3,11 +3,11 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
     getPresentation,
     savePresentation, fixWithScreenshot,
-    getStoredPrompt, semanticConvert,
+    getStoredPrompt, semanticConvert, groupSemanticConvert,
     getScreenshotsStatus, generateScreenshots, getScreenshotUrl,
     getManagedPresentations
 } from '../api';
-import type { ScreenshotsStatus, ManagedPresentation, ContextScreenshot } from '../api';
+import type { ScreenshotsStatus, ManagedPresentation, ContextScreenshot, GroupSlideInput } from '../api';
 import {
     ChevronLeft, ChevronRight, ChevronDown, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
@@ -58,6 +58,12 @@ export const ViewerPage: React.FC = () => {
     const [jsonError, setJsonError] = useState<string | null>(null);
     const [jsonApplied, setJsonApplied] = useState(false);
 
+    // Unsaved changes tracking
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [autosaveEnabled, setAutosaveEnabled] = useState(() => {
+        return localStorage.getItem('autosave') === 'true';
+    });
+
     // Gemini preview state
     const [showGeminiPreview, setShowGeminiPreview] = useState(false);
     const [pendingAIContent, setPendingAIContent] = useState<ContentBlock[]>([]);
@@ -79,6 +85,7 @@ export const ViewerPage: React.FC = () => {
     const [useLucideIcons, setUseLucideIcons] = useState(false);
     const [contextSlidesBefore, setContextSlidesBefore] = useState(0);
     const [contextSlidesAfter, setContextSlidesAfter] = useState(0);
+    const [convertAsGroup, setConvertAsGroup] = useState(false);
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [showPromptEditor, setShowPromptEditor] = useState(false);
 
@@ -301,6 +308,37 @@ export const ViewerPage: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [currentSlideIndex, allSlides.length, isEditing]);
 
+    // Warn before leaving with unsaved changes
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [hasUnsavedChanges]);
+
+    // Autosave effect
+    useEffect(() => {
+        if (!autosaveEnabled || !hasUnsavedChanges || !data || !id || !resultId) return;
+
+        const timer = setTimeout(async () => {
+            setSaving(true);
+            try {
+                await savePresentation(id, resultId, data);
+                setHasUnsavedChanges(false);
+            } catch (e) {
+                console.error('Autosave failed:', e);
+            } finally {
+                setSaving(false);
+            }
+        }, 2000);
+
+        return () => clearTimeout(timer);
+    }, [data, autosaveEnabled, hasUnsavedChanges, id, resultId]);
+
     // Multi-select helpers
     const toggleSlideSelection = (idx: number, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -358,88 +396,146 @@ export const ViewerPage: React.FC = () => {
         setBatchErrors([]);
         setBatchProgress({ current: 0, total: slideIndices.length });
 
-        // Process slides sequentially
-        for (let i = 0; i < slideIndices.length; i++) {
-            const slideIdx = slideIndices[i];
-            const slide = allSlides[slideIdx];
-            setBatchProgress({ current: i + 1, total: slideIndices.length });
-
-            // Update status to 'converting'
-            setBatchResults(prev => prev.map((r, idx) =>
-                idx === i ? { ...r, status: 'converting' as const } : r
-            ));
-
+        // GROUP CONVERSION MODE
+        if (convertAsGroup && slideIndices.length <= 5) {
             try {
-                // Fetch screenshot and convert
-                const screenshotUrl = getScreenshotUrl(id!, slide.order);
-                const response = await fetch(screenshotUrl);
-                const blob = await response.blob();
-                const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
+                // Update all slides to 'converting' status
+                setBatchResults(prev => prev.map(r => ({ ...r, status: 'converting' as const })));
+                setBatchProgress({ current: slideIndices.length, total: slideIndices.length });
 
-                // Collect context slides metadata and screenshots
-                const { contextBefore, contextAfter } = getContextSlides(slideIdx);
-                const contextScreenshots: ContextScreenshot[] = [];
+                // Fetch all screenshots in parallel
+                const slideInputs: GroupSlideInput[] = await Promise.all(
+                    slideIndices.map(async (slideIdx) => {
+                        const slide = allSlides[slideIdx];
+                        const screenshotUrl = getScreenshotUrl(id!, slide.order);
+                        const response = await fetch(screenshotUrl);
+                        const blob = await response.blob();
+                        const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
+                        return {
+                            order: slide.order,
+                            title: slide.title || `Slide ${slide.order}`,
+                            screenshot: file,
+                            rawExtraction: slide
+                        };
+                    })
+                );
 
-                // Fetch context screenshots in parallel
-                const contextFetches: Promise<void>[] = [];
-                for (const ctx of contextBefore) {
-                    contextFetches.push(
-                        fetch(getScreenshotUrl(id!, ctx.order))
-                            .then(res => res.blob())
-                            .then(ctxBlob => {
-                                contextScreenshots.push({
-                                    position: 'before',
-                                    order: ctx.order,
-                                    file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
-                                });
-                            })
-                            .catch(() => { /* skip if unavailable */ })
-                    );
-                }
-                for (const ctx of contextAfter) {
-                    contextFetches.push(
-                        fetch(getScreenshotUrl(id!, ctx.order))
-                            .then(res => res.blob())
-                            .then(ctxBlob => {
-                                contextScreenshots.push({
-                                    position: 'after',
-                                    order: ctx.order,
-                                    file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
-                                });
-                            })
-                            .catch(() => { /* skip if unavailable */ })
-                    );
-                }
-                await Promise.all(contextFetches);
-
-                const res = await semanticConvert(file, slide, {
+                // Call group conversion API
+                const res = await groupSemanticConvert(slideInputs, {
                     conversionId: id,
                     includeMedia: includeMediaInConversion,
                     preserveVisuals,
-                    generateImages: generateAltImages,
                     useLucideIcons,
-                    contextSlides: (contextBefore.length > 0 || contextAfter.length > 0)
-                        ? { before: contextBefore, after: contextAfter }
-                        : undefined,
-                    contextScreenshots: contextScreenshots.length > 0 ? contextScreenshots : undefined
+                    additionalPrompt
                 });
 
-                // Update to 'ready' with AI content (don't auto-apply)
-                setBatchResults(prev => prev.map((r, idx) =>
-                    idx === i ? {
-                        ...r,
-                        status: 'ready' as const,
-                        aiContent: res.semanticContent.content || [],
-                        aiTitle: res.semanticContent.title
-                    } : r
-                ));
+                // Map results back to batch results
+                const aiResults = res.results || [];
+                setBatchResults(prev => prev.map((r, idx) => {
+                    const aiResult = aiResults.find((ar: any) => ar.order === r.slideOrder) || aiResults[idx];
+                    if (aiResult) {
+                        return {
+                            ...r,
+                            status: 'ready' as const,
+                            aiContent: aiResult.content || [],
+                            aiTitle: aiResult.title
+                        };
+                    }
+                    return { ...r, status: 'error' as const, error: 'No result returned for this slide' };
+                }));
             } catch (err) {
                 const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-                console.error(`Failed to convert slide ${slide.order}:`, errorMsg);
-                // Update to 'error' status
+                console.error('Group conversion failed:', errorMsg);
+                setBatchResults(prev => prev.map(r => ({
+                    ...r,
+                    status: 'error' as const,
+                    error: errorMsg
+                })));
+            }
+        } else {
+            // INDIVIDUAL CONVERSION MODE (existing logic)
+            for (let i = 0; i < slideIndices.length; i++) {
+                const slideIdx = slideIndices[i];
+                const slide = allSlides[slideIdx];
+                setBatchProgress({ current: i + 1, total: slideIndices.length });
+
+                // Update status to 'converting'
                 setBatchResults(prev => prev.map((r, idx) =>
-                    idx === i ? { ...r, status: 'error' as const, error: errorMsg } : r
+                    idx === i ? { ...r, status: 'converting' as const } : r
                 ));
+
+                try {
+                    // Fetch screenshot and convert
+                    const screenshotUrl = getScreenshotUrl(id!, slide.order);
+                    const response = await fetch(screenshotUrl);
+                    const blob = await response.blob();
+                    const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
+
+                    // Collect context slides metadata and screenshots
+                    const { contextBefore, contextAfter } = getContextSlides(slideIdx);
+                    const contextScreenshots: ContextScreenshot[] = [];
+
+                    // Fetch context screenshots in parallel
+                    const contextFetches: Promise<void>[] = [];
+                    for (const ctx of contextBefore) {
+                        contextFetches.push(
+                            fetch(getScreenshotUrl(id!, ctx.order))
+                                .then(res => res.blob())
+                                .then(ctxBlob => {
+                                    contextScreenshots.push({
+                                        position: 'before',
+                                        order: ctx.order,
+                                        file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
+                                    });
+                                })
+                                .catch(() => { /* skip if unavailable */ })
+                        );
+                    }
+                    for (const ctx of contextAfter) {
+                        contextFetches.push(
+                            fetch(getScreenshotUrl(id!, ctx.order))
+                                .then(res => res.blob())
+                                .then(ctxBlob => {
+                                    contextScreenshots.push({
+                                        position: 'after',
+                                        order: ctx.order,
+                                        file: new File([ctxBlob], `context_${ctx.order}.png`, { type: 'image/png' })
+                                    });
+                                })
+                                .catch(() => { /* skip if unavailable */ })
+                        );
+                    }
+                    await Promise.all(contextFetches);
+
+                    const res = await semanticConvert(file, slide, {
+                        conversionId: id,
+                        includeMedia: includeMediaInConversion,
+                        preserveVisuals,
+                        generateImages: generateAltImages,
+                        useLucideIcons,
+                        contextSlides: (contextBefore.length > 0 || contextAfter.length > 0)
+                            ? { before: contextBefore, after: contextAfter }
+                            : undefined,
+                        contextScreenshots: contextScreenshots.length > 0 ? contextScreenshots : undefined
+                    });
+
+                    // Update to 'ready' with AI content (don't auto-apply)
+                    setBatchResults(prev => prev.map((r, idx) =>
+                        idx === i ? {
+                            ...r,
+                            status: 'ready' as const,
+                            aiContent: res.semanticContent.content || [],
+                            aiTitle: res.semanticContent.title
+                        } : r
+                    ));
+                } catch (err) {
+                    const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                    console.error(`Failed to convert slide ${slide.order}:`, errorMsg);
+                    // Update to 'error' status
+                    setBatchResults(prev => prev.map((r, idx) =>
+                        idx === i ? { ...r, status: 'error' as const, error: errorMsg } : r
+                    ));
+                }
             }
         }
 
@@ -468,6 +564,9 @@ export const ViewerPage: React.FC = () => {
             });
             return newData;
         });
+
+        // Mark as having unsaved changes
+        setHasUnsavedChanges(true);
 
         // Update batch result status
         setBatchResults(prev => prev.map(r =>
@@ -577,8 +676,9 @@ export const ViewerPage: React.FC = () => {
         setSaving(true);
         try {
             await savePresentation(id, resultId, data);
+            setHasUnsavedChanges(false);
             setIsEditing(false);
-        } catch (e) { alert('Save failed'); } 
+        } catch (e) { alert('Save failed'); }
         finally { setSaving(false); }
     };
 
@@ -728,6 +828,7 @@ export const ViewerPage: React.FC = () => {
             }
         });
         setData(newData);
+        setHasUnsavedChanges(true);
         setShowGeminiPreview(false);
         setPendingAIContent([]);
         setPendingAITitle(undefined);
@@ -750,6 +851,7 @@ export const ViewerPage: React.FC = () => {
             }
         });
         setData(newData);
+        setHasUnsavedChanges(true);
     };
 
     const deleteBlock = (index: number) => {
@@ -762,6 +864,7 @@ export const ViewerPage: React.FC = () => {
             }
         });
         setData(newData);
+        setHasUnsavedChanges(true);
     };
 
     // Sync JSON edit text when switching to JSON view or slide changes
@@ -789,6 +892,7 @@ export const ViewerPage: React.FC = () => {
                 }
             });
             setData(newData);
+            setHasUnsavedChanges(true);
             setJsonError(null);
             setJsonApplied(true);
             // Clear success message after 2 seconds
@@ -947,9 +1051,40 @@ export const ViewerPage: React.FC = () => {
                                 </button>
                             </div>
                         ) : (
-                            <button onClick={() => setIsEditing(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-gray-200">
-                                <Edit3 className="w-4 h-4 mr-2" /> Edit Slide
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setIsEditing(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-gray-200">
+                                    <Edit3 className="w-4 h-4 mr-2" /> Edit Slide
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    disabled={!hasUnsavedChanges || saving}
+                                    className={clsx(
+                                        "flex items-center px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all",
+                                        hasUnsavedChanges
+                                            ? "bg-orange-500 text-white hover:bg-orange-600 shadow-lg"
+                                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                    )}
+                                >
+                                    {saving ? (
+                                        <Loader2 className="animate-spin w-4 h-4 mr-2" />
+                                    ) : (
+                                        <Save className="w-4 h-4 mr-2" />
+                                    )}
+                                    {saving ? 'Saving...' : hasUnsavedChanges ? 'Save' : 'Saved'}
+                                </button>
+                                <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={autosaveEnabled}
+                                        onChange={(e) => {
+                                            setAutosaveEnabled(e.target.checked);
+                                            localStorage.setItem('autosave', e.target.checked.toString());
+                                        }}
+                                        className="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    Auto
+                                </label>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -1653,6 +1788,33 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                     </div>
                                     <p className="text-[10px] text-indigo-600 mt-1">Include surrounding slides for context</p>
                                 </div>
+
+                                {/* Convert as Group Option */}
+                                <label className={clsx(
+                                    "flex items-start gap-2 mb-2 p-2 rounded-lg cursor-pointer border",
+                                    convertAsGroup
+                                        ? "bg-purple-50 border-purple-300 hover:bg-purple-100"
+                                        : "bg-indigo-50/50 border-transparent hover:bg-indigo-100/50"
+                                )}>
+                                    <input
+                                        type="checkbox"
+                                        checked={convertAsGroup}
+                                        onChange={(e) => setConvertAsGroup(e.target.checked)}
+                                        disabled={selectedSlides.size > 5}
+                                        className="w-4 h-4 mt-0.5 rounded border-purple-300 text-purple-600 focus:ring-purple-500"
+                                    />
+                                    <div>
+                                        <span className="text-xs font-medium text-purple-800">Convert as group sequence</span>
+                                        <p className="text-[10px] text-purple-600">
+                                            Send all {selectedSlides.size} slides together - AI will treat them as a progressive sequence
+                                        </p>
+                                        {selectedSlides.size > 5 && (
+                                            <p className="text-[10px] text-red-600 font-medium mt-1">
+                                                Max 5 slides for group conversion (select fewer slides)
+                                            </p>
+                                        )}
+                                    </div>
+                                </label>
 
                                 {/* Generate Alternative Images Option */}
                                 <label className="flex items-start gap-2 mb-4 p-2 bg-amber-50 rounded-lg cursor-pointer hover:bg-amber-100 border border-amber-200">

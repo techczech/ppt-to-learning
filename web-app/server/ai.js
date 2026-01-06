@@ -691,4 +691,181 @@ async function semanticConvert(screenshotBuffer, mimeType, rawExtraction, userKe
     }
 }
 
-module.exports = { analyzeSlide, fixWithScreenshot, semanticConvert, getAvailableModels, extractImageList };
+// Group conversion prompt - for converting multiple slides as a progressive sequence
+const GROUP_SEMANTIC_PROMPT = `
+Analyze these {{SLIDE_COUNT}} slide screenshots and convert them to semantic learning content as a PROGRESSIVE SEQUENCE.
+
+These slides are meant to be viewed in order and BUILD ON EACH OTHER. The content should:
+- Show progression or development of ideas
+- Reference earlier slides where appropriate (e.g., "building on the previous...", "as mentioned...")
+- Maintain consistency in terminology and concepts across slides
+- Be coherent as a sequence - each slide's content should connect to its neighbors
+
+SLIDES DATA:
+{{SLIDES_DATA}}
+
+For EACH slide, analyze:
+1. How it relates to the previous slide(s)
+2. What new information it adds
+3. How it sets up the next slide(s)
+4. What visual cues indicate the relationship (same colors, continuing arrows, numbered steps)
+
+OUTPUT: Return ONLY valid JSON (no markdown) as an ARRAY of slide objects:
+
+[
+  {
+    "order": 1,
+    "title": "slide title",
+    "summary": "one sentence describing what this slide teaches",
+    "semantic_type": "comparison|sequence|definition|list|mixed",
+    "relationship": "introduces|builds_on|parallels|concludes|contrasts",
+    "content": [
+      // Same content block types as single conversion:
+      // comparison, sequence, definition, list, heading, paragraph, image, etc.
+    ]
+  },
+  {
+    "order": 2,
+    "title": "second slide title",
+    // ...same structure
+  }
+  // ...more slides
+]
+
+RELATIONSHIP types:
+- "introduces": First slide, introduces new topic
+- "builds_on": Adds detail/depth to previous slide's concepts
+- "parallels": Shows alternative or parallel concept
+- "concludes": Wraps up or summarizes the sequence
+- "contrasts": Shows opposing viewpoint or counterexample
+
+CRITICAL:
+- Output ALL slides in order
+- Preserve ALL text in original language
+- Make content cohesive across the sequence
+- Each slide's "order" must match the input slide order
+`;
+
+// Group semantic conversion - convert multiple slides as a sequence
+async function groupSemanticConvert(slidesWithScreenshots, userKey, modelName = DEFAULT_MODEL, mediaFiles = [], additionalPrompt = '', preserveVisuals = false, useLucideIcons = false) {
+    const key = userKey || process.env.GEMINI_API_KEY;
+    if (!key) throw new Error("No Gemini API Key provided.");
+
+    const genAI = new GoogleGenerativeAI(key);
+    const selectedModel = AVAILABLE_MODELS[modelName] ? modelName : DEFAULT_MODEL;
+
+    console.log(`[AI] Group semantic conversion: ${slidesWithScreenshots.length} slides with model: ${selectedModel}`);
+
+    const model = genAI.getGenerativeModel({ model: selectedModel });
+
+    // Build slides data section
+    const slidesDataStr = slidesWithScreenshots.map((slide, idx) => {
+        const imageList = extractImageList(slide.rawExtraction);
+        const imageListStr = imageList.length > 0
+            ? imageList.map(img => `  - ${img.src} (${img.alt})`).join('\n')
+            : '  (no images found)';
+
+        return `
+=== SLIDE ${idx + 1} (Order: ${slide.order}, Title: "${slide.title || 'Untitled'}") ===
+Image ${idx + 1} in the attached images shows this slide's screenshot.
+
+Extracted content:
+${JSON.stringify(slide.rawExtraction.content || slide.rawExtraction, null, 2)}
+
+Available images/icons:
+${imageListStr}
+`;
+    }).join('\n');
+
+    // Build visual pattern instructions section
+    let visualInstructionsSection = '';
+    if (preserveVisuals) {
+        visualInstructionsSection = VISUAL_PATTERN_INSTRUCTIONS;
+    }
+
+    // Build Lucide icon instructions section
+    let lucideInstructionsSection = '';
+    if (useLucideIcons) {
+        lucideInstructionsSection = LUCIDE_ICON_INSTRUCTIONS;
+    }
+
+    // Build additional user instructions section
+    let userInstructionsSection = '';
+    if (additionalPrompt) {
+        userInstructionsSection = `\n\nADDITIONAL USER INSTRUCTIONS:\n${additionalPrompt}`;
+    }
+
+    // Build media files section
+    let attachedImagesSection = '';
+    if (mediaFiles.length > 0) {
+        const imageStartIdx = slidesWithScreenshots.length + 1;
+        attachedImagesSection = `\n\nATTACHED MEDIA: Images ${imageStartIdx}+ are extracted media files from the slides:\n` +
+            mediaFiles.map((m, i) => `- Image ${imageStartIdx + i}: ${m.path} (from slide ${m.slideOrder})`).join('\n') +
+            '\n\nFor each attached media, include it in the appropriate slide with correct alt text.';
+    }
+
+    const prompt = GROUP_SEMANTIC_PROMPT
+        .replace('{{SLIDE_COUNT}}', slidesWithScreenshots.length.toString())
+        .replace('{{SLIDES_DATA}}', slidesDataStr) + visualInstructionsSection + lucideInstructionsSection + attachedImagesSection + userInstructionsSection;
+
+    console.log(`[AI] Group prompt length: ${prompt.length} chars`);
+
+    // Build image parts array - screenshots in order, then media files
+    const imageParts = [];
+
+    for (const slide of slidesWithScreenshots) {
+        imageParts.push({
+            inlineData: {
+                data: slide.screenshotBuffer.toString("base64"),
+                mimeType: slide.screenshotMimeType
+            }
+        });
+    }
+
+    // Add media files
+    for (const media of mediaFiles) {
+        imageParts.push({
+            inlineData: {
+                data: media.buffer.toString("base64"),
+                mimeType: media.mimeType
+            }
+        });
+    }
+
+    console.log(`[AI] Total images in request: ${imageParts.length}`);
+
+    try {
+        console.log(`[AI] Sending group request to Gemini API (timeout: ${API_TIMEOUT_MS / 1000}s)...`);
+        const result = await withTimeout(
+            model.generateContent([prompt, ...imageParts]),
+            API_TIMEOUT_MS * 2, // Double timeout for group conversion
+            'Group semantic conversion'
+        );
+        const response = await result.response;
+        const text = response.text();
+        console.log(`[AI] Group response received, length: ${text.length} chars`);
+
+        // Extract JSON array
+        const results = extractJSON(text);
+
+        // Validate it's an array
+        if (!Array.isArray(results)) {
+            console.error('[AI] Expected array response for group conversion');
+            throw new Error('Invalid response format: expected array of slide results');
+        }
+
+        console.log(`[AI] Successfully parsed ${results.length} slide results`);
+        return results;
+    } catch (error) {
+        console.error(`[AI] Gemini API error:`, error.message);
+        if (error.message?.includes('fetch failed')) {
+            throw new Error(`Network error calling Gemini API. Check your internet connection and API key.`);
+        }
+        if (error.status === 404) {
+            throw new Error(`Model "${selectedModel}" not found. Try a different model in Settings.`);
+        }
+        throw error;
+    }
+}
+
+module.exports = { analyzeSlide, fixWithScreenshot, semanticConvert, groupSemanticConvert, getAvailableModels, extractImageList };

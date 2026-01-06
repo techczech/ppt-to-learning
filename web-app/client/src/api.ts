@@ -553,6 +553,58 @@ export const semanticConvert = async (
     return res.data;
 };
 
+// Group Semantic Conversion - Convert multiple slides as a sequence
+export interface GroupSlideInput {
+    order: number;
+    title: string;
+    screenshot: File;
+    rawExtraction: any;
+}
+
+export const groupSemanticConvert = async (
+    slides: GroupSlideInput[],
+    options?: {
+        conversionId?: string;
+        includeMedia?: boolean;
+        additionalPrompt?: string;
+        preserveVisuals?: boolean;
+        useLucideIcons?: boolean;
+    }
+) => {
+    const formData = new FormData();
+
+    // Add each slide's screenshot and extraction
+    for (let i = 0; i < slides.length; i++) {
+        formData.append('screenshots', slides[i].screenshot, `slide_${slides[i].order}.png`);
+    }
+
+    // Add slides metadata (order, title, rawExtraction)
+    formData.append('slides', JSON.stringify(slides.map(s => ({
+        order: s.order,
+        title: s.title,
+        rawExtraction: s.rawExtraction
+    }))));
+
+    if (options?.conversionId) {
+        formData.append('conversionId', options.conversionId);
+    }
+    if (options?.includeMedia) {
+        formData.append('includeMedia', 'true');
+    }
+    if (options?.additionalPrompt) {
+        formData.append('additionalPrompt', options.additionalPrompt);
+    }
+    if (options?.preserveVisuals) {
+        formData.append('preserveVisuals', 'true');
+    }
+    if (options?.useLucideIcons) {
+        formData.append('useLucideIcons', 'true');
+    }
+
+    const res = await api.post(`/ai/convert-group`, formData);
+    return res.data;
+};
+
 // --- Screenshot Functions ---
 
 export interface ScreenshotsStatus {

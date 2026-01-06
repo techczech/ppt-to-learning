@@ -137,6 +137,82 @@ router.post('/ai/convert', convertUpload, async (req, res) => {
     }
 });
 
+// Group Conversion - Convert multiple slides as a sequence
+const groupUpload = memUpload.fields([
+    { name: 'screenshots', maxCount: 5 }
+]);
+
+router.post('/ai/convert-group', groupUpload, async (req, res) => {
+    try {
+        const userKey = req.headers['x-gemini-key'];
+        const modelName = req.headers['x-gemini-model'] || req.body.model;
+        const slides = JSON.parse(req.body.slides);
+        const includeMedia = req.body.includeMedia === 'true';
+        const conversionId = req.body.conversionId;
+        const additionalPrompt = req.body.additionalPrompt || '';
+        const preserveVisuals = req.body.preserveVisuals === 'true';
+        const useLucideIcons = req.body.useLucideIcons === 'true';
+
+        const screenshots = req.files['screenshots'] || [];
+        if (screenshots.length === 0) {
+            return res.status(400).json({ error: 'Missing screenshots' });
+        }
+        if (screenshots.length !== slides.length) {
+            return res.status(400).json({ error: 'Screenshot count must match slide count' });
+        }
+
+        console.log(`[AI] Group conversion: ${slides.length} slides`);
+
+        // Pair screenshots with slides
+        const slidesWithScreenshots = slides.map((slide, idx) => ({
+            ...slide,
+            screenshotBuffer: screenshots[idx].buffer,
+            screenshotMimeType: screenshots[idx].mimetype
+        }));
+
+        // Load media files if requested
+        let allMediaFiles = [];
+        if (includeMedia && conversionId) {
+            const storageDir = path.join(getStorageDir(), conversionId);
+            for (const slide of slides) {
+                const imageList = ai.extractImageList(slide.rawExtraction);
+                for (const img of imageList) {
+                    const mediaPath = path.join(storageDir, img.src);
+                    if (fs.existsSync(mediaPath)) {
+                        try {
+                            const buffer = fs.readFileSync(mediaPath);
+                            const ext = path.extname(img.src).toLowerCase();
+                            const mimeType = ext === '.png' ? 'image/png' :
+                                             ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+                                             ext === '.gif' ? 'image/gif' :
+                                             ext === '.webp' ? 'image/webp' : 'image/png';
+                            allMediaFiles.push({ path: img.src, buffer, mimeType, slideOrder: slide.order });
+                        } catch (err) {
+                            console.log(`[AI] Could not load media file: ${img.src}`);
+                        }
+                    }
+                }
+            }
+            console.log(`[AI] Loaded ${allMediaFiles.length} media files for group conversion`);
+        }
+
+        const results = await ai.groupSemanticConvert(
+            slidesWithScreenshots,
+            userKey,
+            modelName,
+            allMediaFiles,
+            additionalPrompt,
+            preserveVisuals,
+            useLucideIcons
+        );
+
+        res.json({ results });
+    } catch (e) {
+        console.error('Group conversion error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Get Available Models
 router.get('/ai/models', (req, res) => {
     res.json(ai.getAvailableModels());
