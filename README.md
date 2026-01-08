@@ -56,29 +56,46 @@ Transform PowerPoint presentations into interactive, semantic web-based learning
 
 ## Installation
 
-### 1. Clone the Repository
+### Guided Setup (Recommended)
+
+This script checks dependencies and, with your permission, installs missing ones, sets up the Python venv, installs npm packages, and creates `.env` if needed.
+
+**macOS/Linux:**
+```bash
+./setup.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+### Manual Setup (Fallback)
+
+#### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/ppt-to-learning.git
 cd ppt-to-learning
 ```
 
-### 2. Python Environment Setup
+#### 2. Python Environment Setup
 
 ```bash
 # Create virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
 
 # Install Python dependencies
-pip install python-pptx Pillow
+pip install -r requirements.txt
 ```
 
-### 3. Install Optional Dependencies (for Screenshots)
+#### 3. Install Optional Dependencies (for Screenshots)
 
 **macOS:**
 ```bash
-brew install libreoffice poppler
+brew install --cask libreoffice
+brew install poppler
 ```
 
 **Ubuntu/Debian:**
@@ -90,7 +107,7 @@ sudo apt-get install libreoffice poppler-utils
 - Download LibreOffice from https://www.libreoffice.org/download/
 - Download Poppler from https://github.com/oschwartz10612/poppler-windows/releases
 
-### 4. Web Application Setup
+#### 4. Web Application Setup
 
 ```bash
 # Install root dependencies (for running both servers)
@@ -106,7 +123,7 @@ cd ../client
 npm install
 ```
 
-### 5. Configure Environment
+#### 5. Configure Environment
 
 Create a `.env` file in `web-app/server/`:
 
@@ -127,10 +144,15 @@ Alternatively, you can enter your API key in the web app's Settings modal.
 
 ### Start Both Servers (Recommended)
 
-From the `web-app` directory:
+From the repo root:
 
 ```bash
-npm run dev
+./run.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+.\run.ps1
 ```
 
 This starts:
@@ -138,19 +160,18 @@ This starts:
 - **Frontend**: http://localhost:5173
 
 Open http://localhost:5173 in your browser.
+If dependencies are missing, the run script will prompt to run setup.
 
 ### Start Servers Separately
 
 **Backend only:**
 ```bash
-cd web-app/server
-node index.js
+npm run server
 ```
 
 **Frontend only:**
 ```bash
-cd web-app/client
-npm run dev
+npm run client
 ```
 
 ## Usage
@@ -224,6 +245,10 @@ web-app/server/
 
 ```
 ppt-to-learning/
+├── setup.sh                  # Guided setup entrypoint (macOS/Linux)
+├── run.sh                    # App runner (macOS/Linux)
+├── setup.ps1                 # Guided setup entrypoint (Windows)
+├── run.ps1                   # App runner (Windows)
 ├── src/ppt_to_learning/       # Python PPTX extraction
 │   ├── core/                  # Data models
 │   └── extractors/            # PPTX parsing logic
@@ -237,7 +262,7 @@ ppt-to-learning/
 │       ├── index.js           # API routes
 │       ├── db.js              # Data persistence
 │       └── ai.js              # Gemini integration
-├── scripts/                   # Migration utilities
+├── setup/                     # Setup implementation scripts
 └── tests/                     # Test files
 ```
 
@@ -285,7 +310,7 @@ Screenshots require LibreOffice and Poppler. If not installed, the app will stil
 - Ensure Poppler is installed and `pdftoppm` is in PATH
 
 ### "Failed to save collection" (404)
-- Restart the server: `cd web-app && npm run dev`
+- Restart the server: `npm run dev`
 - The server may be running old code
 
 ### AI conversion fails

@@ -1,0 +1,9 @@
+{
+  "name": "ppt-to-learning",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix web-app run dev",
+    "server": "npm --prefix web-app run server",
+    "client": "npm --prefix web-app run client"
+  }
+}
