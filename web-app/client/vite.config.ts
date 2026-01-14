@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:3001',
+      '/api': {
+        target: 'http://localhost:3001',
+        timeout: 300000, // 5 minutes for large uploads
+      },
       '/media': 'http://localhost:3001',
       '/legacy-media': 'http://localhost:3001'
     }

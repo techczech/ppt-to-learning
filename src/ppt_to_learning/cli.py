@@ -2,6 +2,7 @@ import argparse
 import os
 import glob
 import logging
+import sys
 from .extractors.pptx_extractor import PptxExtractor
 from .generators.site_generator import SiteGenerator
 
@@ -22,7 +23,7 @@ def main():
     
     if not os.path.exists(args.input):
         logger.error(f"Input path does not exist: {args.input}")
-        return
+        sys.exit(1)
 
     # Prepare directories
     media_dir = os.path.join(args.output, "media")
@@ -35,13 +36,13 @@ def main():
             pptx_files.append(args.input)
         else:
             logger.error("Input file is not a .pptx file")
-            return
+            sys.exit(1)
     else:
         # Directory mode
         pptx_files = glob.glob(os.path.join(args.input, "*.pptx"))
         if not pptx_files:
             logger.warning(f"No .pptx files found in {args.input}")
-            return
+            sys.exit(1)
         
     extractor = PptxExtractor()
     generator = SiteGenerator()
@@ -54,10 +55,13 @@ def main():
             presentations.append(p_data)
         except Exception as e:
             logger.error(f"Failed to process {file_path}", exc_info=True)
-            
+
     if presentations:
         generator.generate(presentations, args.output)
         logger.info(f"Successfully generated content for {len(presentations)} presentations in {args.output}")
+    else:
+        logger.error("No presentations were successfully processed")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
