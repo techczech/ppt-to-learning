@@ -15,6 +15,26 @@ const router = express.Router();
 const getSourcesDir = () => path.join(getDataPaths().uploadsPath, 'sources');
 const getStorageDir = () => getDataPaths().storagePath;
 
+// Generate human-readable presentation ID: YYYYMMDD_filename_random6
+function generatePresentationId(originalFilename) {
+    // Get date in YYYYMMDD format
+    const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
+
+    // Sanitize and truncate filename
+    const sanitized = originalFilename
+        .replace(/\.pptx?$/i, '')           // Remove extension
+        .replace(/[^a-z0-9_\-]/gi, '-')     // Replace special chars with hyphen
+        .replace(/-+/g, '-')                // Collapse multiple hyphens
+        .replace(/^-|-$/g, '')              // Trim leading/trailing hyphens
+        .toLowerCase()
+        .substring(0, 40);                  // Truncate to 40 chars
+
+    // Generate random 6-char alphanumeric
+    const random = Math.random().toString(36).substring(2, 8);
+
+    return `${date}_${sanitized}_${random}`;
+}
+
 // Multer configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -23,7 +43,7 @@ const storage = multer.diskStorage({
         cb(null, dir);
     },
     filename: (req, file, cb) => {
-        const id = uuidv4();
+        const id = generatePresentationId(file.originalname);
         const filename = `${id}${path.extname(file.originalname)}`;
         req.fileId = id;
         cb(null, filename);

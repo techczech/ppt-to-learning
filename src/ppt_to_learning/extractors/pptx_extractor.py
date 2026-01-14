@@ -124,7 +124,9 @@ class PptxExtractor(IPresentationExtractor):
                 content.append(LinkBlock(text=title, url=title_url))
 
         shapes = list(slide.shapes)
-        shapes.sort(key=lambda s: (s.top if hasattr(s, 'top') else 0, s.left if hasattr(s, 'left') else 0))
+        # Handle None values in top/left - some shapes don't have position
+        shapes.sort(key=lambda s: (s.top if (hasattr(s, 'top') and s.top is not None) else 0,
+                                   s.left if (hasattr(s, 'left') and s.left is not None) else 0))
 
         for shape in shapes:
             # Check for embedded video in ANY shape type first
