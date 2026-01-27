@@ -190,6 +190,29 @@ npm run client
 4. Press `/` to search within the presentation
 5. Click "Fix with Gemini" to enhance slides with AI
 
+### Extraction Engine Selection (CLI)
+
+The CLI supports both the legacy extractor and the unified extractor (from `ppt-archive`):
+
+```bash
+python -m ppt_to_learning.cli --input ./presentations --output ./out --engine auto
+```
+
+- `--engine auto` (default): uses unified extractor if available, otherwise legacy
+- `--engine unified`: force unified extractor
+- `--engine legacy`: force legacy extractor
+
+Unified extractor output is organized as:
+```
+<output>/<presentation-id>/presentation.json
+<output>/<presentation-id>/media/<presentation-id>/*
+```
+
+To generate the legacy `index.html`/`viewer.html` for unified output:
+```bash
+python scripts/generate-legacy-viewer.py --input ./out --output ./out-legacy-viewer
+```
+
 ### Batch Operations
 
 1. In grid view, select slides using checkboxes

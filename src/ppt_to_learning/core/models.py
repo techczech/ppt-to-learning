@@ -1,12 +1,41 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Union
 
+# --- Text Formatting ---
+
+@dataclass
+class TextRun:
+    """A run of text with formatting."""
+    text: str
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    url: Optional[str] = None
+    font_size: Optional[float] = None  # In points
+    font_color: Optional[str] = None  # Hex color
+
+    def to_dict(self):
+        result = {"text": self.text}
+        if self.bold:
+            result["bold"] = True
+        if self.italic:
+            result["italic"] = True
+        if self.underline:
+            result["underline"] = True
+        if self.url:
+            result["url"] = self.url
+        if self.font_size:
+            result["font_size"] = self.font_size
+        if self.font_color:
+            result["font_color"] = self.font_color
+        return result
+
 # --- Content Blocks ---
 
 @dataclass
 class ContentBlock:
-    type: str  # 'heading', 'paragraph', 'list', 'image', 'smart_art', 'table'
-    
+    type: str  # 'heading', 'paragraph', 'list', 'image', 'smart_art', 'table', 'shape'
+
     def to_dict(self):
         return {"type": self.type}
 
@@ -32,6 +61,7 @@ class ListItem:
     text: str
     level: int = 0
     url: Optional[str] = None
+    runs: List[TextRun] = field(default_factory=list)  # Formatted text runs
     children: List['ListItem'] = field(default_factory=list)
 
     def to_dict(self):
@@ -42,6 +72,8 @@ class ListItem:
         }
         if self.url:
             result["url"] = self.url
+        if self.runs:
+            result["runs"] = [r.to_dict() for r in self.runs]
         return result
 
 @dataclass
@@ -84,6 +116,52 @@ class VideoBlock(ContentBlock):
 
     def to_dict(self):
         return {"type": "video", "src": self.src, "title": self.title}
+
+@dataclass
+class ShapeBlock(ContentBlock):
+    """An auto shape (arrow, connector, symbol, etc.)."""
+    shape_type: str = ""  # e.g., "arrow", "rectangle", "notEqual", "connector"
+    shape_name: str = ""  # PowerPoint shape name
+    text: str = ""  # Text inside the shape if any
+    runs: List[TextRun] = field(default_factory=list)  # Formatted text
+    # Position (in EMUs)
+    left: int = 0
+    top: int = 0
+    width: int = 0
+    height: int = 0
+    # Visual properties
+    fill_color: Optional[str] = None
+    line_color: Optional[str] = None
+    rotation: float = 0.0
+    # Animation
+    animation_order: Optional[int] = None  # Entry order in animations
+    type: str = "shape"
+
+    def to_dict(self):
+        result = {
+            "type": "shape",
+            "shape_type": self.shape_type,
+            "shape_name": self.shape_name,
+            "position": {
+                "left": self.left,
+                "top": self.top,
+                "width": self.width,
+                "height": self.height,
+            },
+        }
+        if self.text:
+            result["text"] = self.text
+        if self.runs:
+            result["runs"] = [r.to_dict() for r in self.runs]
+        if self.fill_color:
+            result["fill_color"] = self.fill_color
+        if self.line_color:
+            result["line_color"] = self.line_color
+        if self.rotation:
+            result["rotation"] = self.rotation
+        if self.animation_order is not None:
+            result["animation_order"] = self.animation_order
+        return result
 
 @dataclass
 class SmartArtNode:

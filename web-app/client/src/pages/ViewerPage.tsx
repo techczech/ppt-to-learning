@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
     getPresentation,
@@ -12,7 +12,7 @@ import {
     ChevronLeft, ChevronRight, ChevronDown, Menu, Home, Code,
     Edit3, Save, Sparkles, Camera, Loader2, X, Wand2, ImageIcon,
     Eye, EyeOff, Grid, Maximize2, Search, CheckSquare, Check,
-    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download, FileText
+    Square, Trash2, AlertCircle, ZoomIn, ZoomOut, Library, Download, FileText, FolderOpen, Info
 } from 'lucide-react';
 import clsx from 'clsx';
 import SlidePromotionModal from '../components/SlidePromotionModal';
@@ -92,6 +92,15 @@ export const ViewerPage: React.FC = () => {
     // Screenshot state
     const [screenshotsStatus, setScreenshotsStatus] = useState<ScreenshotsStatus | null>(null);
     const [generatingScreenshots, setGeneratingScreenshots] = useState(false);
+    const [screenshotPanelOpen, setScreenshotPanelOpen] = useState(false);
+    const [screenshotVersion, setScreenshotVersion] = useState(0);
+    const [statsPanelOpen, setStatsPanelOpen] = useState(false);
+    const [slideTypeFilter, setSlideTypeFilter] = useState<string>('all');
+    const [imageFilter, setImageFilter] = useState<'all' | 'with' | 'without'>('all');
+    const [smartartFilter, setSmartartFilter] = useState<string>('all');
+    const [gotoSlideInput, setGotoSlideInput] = useState('');
+    const gotoInputRef = useRef<HTMLInputElement | null>(null);
+    const [showShortcutModal, setShowShortcutModal] = useState(false);
 
     // Thumbnail & view state
     const [showThumbnail, setShowThumbnail] = useState(true);
@@ -125,6 +134,32 @@ export const ViewerPage: React.FC = () => {
         if (!data) return [];
         return data.sections.flatMap(s => s.slides);
     }, [data]);
+    const currentSlide = allSlides[currentSlideIndex];
+
+    const screenshotSet = useMemo(() => {
+        const urls = screenshotsStatus?.screenshots || [];
+        const set = new Set<number>();
+        urls.forEach((url) => {
+            const match = url.match(/slide_(\d+)\.png/);
+            if (match) set.add(parseInt(match[1], 10));
+        });
+        return set;
+    }, [screenshotsStatus]);
+
+    const hasSlideScreenshot = (order?: number) => {
+        if (!order) return false;
+        return screenshotSet.has(order);
+    };
+
+    const screenshotUrl = (order: number) => `${getScreenshotUrl(id!, order)}?v=${screenshotVersion}`;
+
+    const totalSlideOrders = useMemo(() => {
+        return allSlides.map((slide) => slide.order).filter((order) => typeof order === 'number');
+    }, [allSlides]);
+
+    const missingSlideOrders = useMemo(() => {
+        return totalSlideOrders.filter((order) => !screenshotSet.has(order));
+    }, [totalSlideOrders, screenshotSet]);
 
     // Helper to create text summary of slide content for context
     const summarizeContent = (content: ContentBlock[]): string => {
@@ -261,6 +296,7 @@ export const ViewerPage: React.FC = () => {
             try {
                 const status = await getScreenshotsStatus(id);
                 setScreenshotsStatus(status);
+                setScreenshotVersion(Date.now());
             } catch (err) { console.error('Failed to fetch screenshots status:', err); }
         };
         fetchInfo();
@@ -289,12 +325,36 @@ export const ViewerPage: React.FC = () => {
                 case 'c':
                     if (!isEditing) setAIPanelOpen(true);
                     break;
+                case 'i':
+                    if (!isEditing) setStatsPanelOpen(v => !v);
+                    break;
+                case 's':
+                    if (!isEditing) setScreenshotPanelOpen(v => !v);
+                    break;
+                case 'A':
+                    if (!isEditing) handleGenerateScreenshots();
+                    break;
+                case 'M':
+                    if (!isEditing) handleGenerateScreenshots(missingSlideOrders);
+                    break;
+                case 'S':
+                    if (!isEditing && currentSlide?.order) handleGenerateScreenshots([currentSlide.order]);
+                    break;
+                case 'j':
+                    if (!isEditing) {
+                        setStatsPanelOpen(true);
+                        setTimeout(() => gotoInputRef.current?.focus(), 0);
+                    }
+                    break;
                 case 'Escape':
                     setAIPanelOpen(false);
                     setThumbnailModal(false);
                     setGridView(false);
                     setSearchOpen(false);
                     setSearchQuery('');
+                    setScreenshotPanelOpen(false);
+                    setStatsPanelOpen(false);
+                    setShowShortcutModal(false);
                     break;
                 case '/':
                     if (!isEditing) {
@@ -302,11 +362,23 @@ export const ViewerPage: React.FC = () => {
                         setSearchOpen(true);
                     }
                     break;
+                case '?':
+                    if (!isEditing) {
+                        e.preventDefault();
+                        setShowShortcutModal(true);
+                    }
+                    break;
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [currentSlideIndex, allSlides.length, isEditing]);
+    }, [
+        currentSlideIndex,
+        allSlides.length,
+        isEditing,
+        currentSlide?.order,
+        missingSlideOrders
+    ]);
 
     // Warn before leaving with unsaved changes
     useEffect(() => {
@@ -407,7 +479,7 @@ export const ViewerPage: React.FC = () => {
                 const slideInputs: GroupSlideInput[] = await Promise.all(
                     slideIndices.map(async (slideIdx) => {
                         const slide = allSlides[slideIdx];
-                        const screenshotUrl = getScreenshotUrl(id!, slide.order);
+                        const screenshotUrl = `${getScreenshotUrl(id!, slide.order)}?v=${screenshotVersion}`;
                         const response = await fetch(screenshotUrl);
                         const blob = await response.blob();
                         const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
@@ -466,7 +538,7 @@ export const ViewerPage: React.FC = () => {
 
                 try {
                     // Fetch screenshot and convert
-                    const screenshotUrl = getScreenshotUrl(id!, slide.order);
+                    const screenshotUrl = `${getScreenshotUrl(id!, slide.order)}?v=${screenshotVersion}`;
                     const response = await fetch(screenshotUrl);
                     const blob = await response.blob();
                     const file = new File([blob], `slide_${slide.order}.png`, { type: 'image/png' });
@@ -479,7 +551,7 @@ export const ViewerPage: React.FC = () => {
                     const contextFetches: Promise<void>[] = [];
                     for (const ctx of contextBefore) {
                         contextFetches.push(
-                            fetch(getScreenshotUrl(id!, ctx.order))
+                            fetch(`${getScreenshotUrl(id!, ctx.order)}?v=${screenshotVersion}`)
                                 .then(res => res.blob())
                                 .then(ctxBlob => {
                                     contextScreenshots.push({
@@ -493,7 +565,7 @@ export const ViewerPage: React.FC = () => {
                     }
                     for (const ctx of contextAfter) {
                         contextFetches.push(
-                            fetch(getScreenshotUrl(id!, ctx.order))
+                            fetch(`${getScreenshotUrl(id!, ctx.order)}?v=${screenshotVersion}`)
                                 .then(res => res.blob())
                                 .then(ctxBlob => {
                                     contextScreenshots.push({
@@ -646,16 +718,28 @@ export const ViewerPage: React.FC = () => {
         setCurrentSlideIndex(0);
     };
 
-    const handleGenerateScreenshots = async () => {
+    const handleGenerateScreenshots = async (slides?: number[]) => {
         if (!id) return;
         setGeneratingScreenshots(true);
         try {
-            await generateScreenshots(id);
+            await generateScreenshots(id, slides && slides.length ? { slides } : undefined);
             // Poll for completion
             const pollInterval = setInterval(async () => {
                 const status = await getScreenshotsStatus(id);
                 setScreenshotsStatus(status);
-                if (status.hasScreenshots) {
+                setScreenshotVersion(Date.now());
+                const existing = new Set(
+                    (status.screenshots || [])
+                        .map((url) => {
+                            const match = url.match(/slide_(\d+)\.png/);
+                            return match ? parseInt(match[1], 10) : null;
+                        })
+                        .filter((n) => n !== null)
+                );
+                const allDone = slides && slides.length
+                    ? slides.every((n) => existing.has(n))
+                    : status.hasScreenshots;
+                if (allDone) {
                     clearInterval(pollInterval);
                     setGeneratingScreenshots(false);
                 }
@@ -752,7 +836,7 @@ export const ViewerPage: React.FC = () => {
             const contextFetches: Promise<void>[] = [];
             for (const ctx of contextBefore) {
                 contextFetches.push(
-                    fetch(getScreenshotUrl(id!, ctx.order))
+                    fetch(`${getScreenshotUrl(id!, ctx.order)}?v=${screenshotVersion}`)
                         .then(res => res.blob())
                         .then(ctxBlob => {
                             contextScreenshots.push({
@@ -766,7 +850,7 @@ export const ViewerPage: React.FC = () => {
             }
             for (const ctx of contextAfter) {
                 contextFetches.push(
-                    fetch(getScreenshotUrl(id!, ctx.order))
+                    fetch(`${getScreenshotUrl(id!, ctx.order)}?v=${screenshotVersion}`)
                         .then(res => res.blob())
                         .then(ctxBlob => {
                             contextScreenshots.push({
@@ -903,10 +987,81 @@ export const ViewerPage: React.FC = () => {
         }
     };
 
+    const getSlideType = (slide: Slide) => {
+        const layout = (slide.layout || '').toLowerCase();
+        if (layout.includes('section heading')) return 'section';
+        if (layout.includes('title slide')) return 'title';
+        if (layout.includes('sidebar') || layout.includes('side bar') || layout.includes('half page')) return 'sidebar';
+        if (layout === 'quote') return 'quote';
+        if (layout.includes('image') || layout.includes('screenshot') || layout.includes('video')) return 'media';
+        if (!slide.content || slide.content.length === 0) return 'statement';
+        return 'content';
+    };
+
+    const slideTypeCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        allSlides.forEach((slide) => {
+            const type = getSlideType(slide);
+            counts[type] = (counts[type] || 0) + 1;
+        });
+        return counts;
+    }, [allSlides]);
+
+    const smartartTypeCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        allSlides.forEach((slide) => {
+            slide.content.forEach((block) => {
+                if (block.type === 'smart_art') {
+                    const layout = (block as any).layout || 'Unknown';
+                    counts[layout] = (counts[layout] || 0) + 1;
+                }
+            });
+        });
+        return counts;
+    }, [allSlides]);
+
+    const imageCount = useMemo(() => {
+        let count = 0;
+        allSlides.forEach((slide) => {
+            slide.content.forEach((block) => {
+                if (block.type === 'image') count += 1;
+            });
+        });
+        return count;
+    }, [allSlides]);
+
+    const videoCount = useMemo(() => {
+        let count = 0;
+        allSlides.forEach((slide) => {
+            slide.content.forEach((block) => {
+                if (block.type === 'video') count += 1;
+            });
+        });
+        return count;
+    }, [allSlides]);
+
+    const filteredSlideEntries = useMemo(() => {
+        return allSlides
+            .map((slide, idx) => ({ slide, idx }))
+            .filter(({ slide }) => {
+                if (slideTypeFilter !== 'all' && getSlideType(slide) !== slideTypeFilter) return false;
+                if (imageFilter === 'with' && !slide.content.some((b) => b.type === 'image')) return false;
+                if (imageFilter === 'without' && slide.content.some((b) => b.type === 'image')) return false;
+                if (smartartFilter !== 'all') {
+                    const hasSmartArt = slide.content.some((b) => b.type === 'smart_art');
+                    if (smartartFilter === 'any' && !hasSmartArt) return false;
+                    if (smartartFilter !== 'any') {
+                        const hasLayout = slide.content.some((b) => b.type === 'smart_art' && (b as any).layout === smartartFilter);
+                        if (!hasLayout) return false;
+                    }
+                }
+                return true;
+            });
+    }, [allSlides, slideTypeFilter, imageFilter, smartartFilter]);
+
     if (loading) return <div className="p-10 flex items-center justify-center h-screen text-gray-400">Loading...</div>;
     if (!data) return <div className="p-10 text-red-500">Failed to load content.</div>;
 
-    const currentSlide = allSlides[currentSlideIndex];
     const conversionId = id!;
 
     return (
@@ -950,6 +1105,252 @@ export const ViewerPage: React.FC = () => {
                 </div>
             </div>
 
+            {/* Screenshot Tools Panel */}
+            <div
+                className={clsx(
+                    "fixed top-0 right-0 h-full w-96 bg-white border-l border-gray-200 shadow-2xl z-[70] transition-transform duration-300",
+                    screenshotPanelOpen ? "translate-x-0" : "translate-x-full"
+                )}
+            >
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-900">Screenshot Tools</h3>
+                        <p className="text-xs text-gray-500">Generate or refresh slide screenshots</p>
+                    </div>
+                    <button
+                        onClick={() => setScreenshotPanelOpen(false)}
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+                <div className="p-4 space-y-4 overflow-y-auto h-full">
+                    <div className="p-3 rounded-lg border border-gray-200 bg-gray-50">
+                        <div className="flex items-center justify-between text-xs text-gray-600">
+                            <span>Total slides</span>
+                            <span className="font-semibold">{allSlides.length}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-600 mt-1">
+                            <span>Screenshots available</span>
+                            <span className="font-semibold">{screenshotsStatus?.count || 0}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-600 mt-1">
+                            <span>Missing</span>
+                            <span className="font-semibold">{missingSlideOrders.length}</span>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <button
+                            onClick={() => handleGenerateScreenshots()}
+                            disabled={generatingScreenshots}
+                            className="w-full px-4 py-2 text-sm font-bold rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 flex items-center justify-center"
+                        >
+                            {generatingScreenshots ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Camera className="w-4 h-4 mr-2" />}
+                            Generate All
+                        </button>
+                        <button
+                            onClick={() => handleGenerateScreenshots(missingSlideOrders)}
+                            disabled={generatingScreenshots || missingSlideOrders.length === 0}
+                            className="w-full px-4 py-2 text-sm font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                            Generate Missing
+                        </button>
+                        <button
+                            onClick={() => currentSlide?.order && handleGenerateScreenshots([currentSlide.order])}
+                            disabled={generatingScreenshots || !currentSlide?.order}
+                            className="w-full px-4 py-2 text-sm font-bold rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                        >
+                            Current Slide Only
+                        </button>
+                    </div>
+
+                    {missingSlideOrders.length > 0 && (
+                        <div className="pt-2">
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                Missing Screenshots
+                            </h4>
+                            <div className="space-y-1 max-h-56 overflow-y-auto">
+                                {missingSlideOrders.map((order) => {
+                                    const slide = allSlides.find((s) => s.order === order);
+                                    return (
+                                        <div key={order} className="text-xs text-gray-600 flex items-center justify-between bg-white border border-gray-100 rounded px-2 py-1">
+                                            <span className="font-mono text-gray-400">#{order}</span>
+                                            <span className="truncate ml-2 flex-1">{slide?.title || `Slide ${order}`}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {screenshotPanelOpen && (
+                <div
+                    className="fixed inset-0 bg-black/10 z-[60]"
+                    onClick={() => setScreenshotPanelOpen(false)}
+                />
+            )}
+
+            {/* Stats & Filters Panel */}
+            <div
+                className={clsx(
+                    "fixed top-0 right-0 h-full w-96 bg-white border-l border-gray-200 shadow-2xl z-[70] transition-transform duration-300",
+                    statsPanelOpen ? "translate-x-0" : "translate-x-full"
+                )}
+            >
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-900">Slide Stats & Filters</h3>
+                        <p className="text-xs text-gray-500">Overview and quick filters</p>
+                    </div>
+                    <button
+                        onClick={() => setStatsPanelOpen(false)}
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+                <div className="p-4 space-y-4 overflow-y-auto h-full">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 rounded-lg border border-gray-200">
+                            <div className="text-xs text-gray-500">Slides</div>
+                            <div className="text-lg font-semibold">{allSlides.length}</div>
+                        </div>
+                        <div className="p-3 rounded-lg border border-gray-200">
+                            <div className="text-xs text-gray-500">Images</div>
+                            <div className="text-lg font-semibold">{imageCount}</div>
+                        </div>
+                        <div className="p-3 rounded-lg border border-gray-200">
+                            <div className="text-xs text-gray-500">Videos</div>
+                            <div className="text-lg font-semibold">{videoCount}</div>
+                        </div>
+                        <div className="p-3 rounded-lg border border-gray-200">
+                            <div className="text-xs text-gray-500">Slide Types</div>
+                            <div className="text-lg font-semibold">{Object.keys(slideTypeCounts).length}</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Slide Types</h4>
+                        <div className="space-y-1">
+                            {Object.entries(slideTypeCounts).map(([type, count]) => (
+                                <div key={type} className="flex items-center justify-between text-xs text-gray-600">
+                                    <span className="capitalize">{type}</span>
+                                    <span className="font-semibold">{count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">SmartArt Types</h4>
+                        {Object.keys(smartartTypeCounts).length === 0 ? (
+                            <div className="text-xs text-gray-400">No SmartArt detected</div>
+                        ) : (
+                            <div className="space-y-1">
+                                {Object.entries(smartartTypeCounts).map(([type, count]) => (
+                                    <div key={type} className="flex items-center justify-between text-xs text-gray-600">
+                                        <span className="truncate max-w-[220px]">{type}</span>
+                                        <span className="font-semibold">{count}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-100 space-y-3">
+                        <div>
+                            <label className="text-xs text-gray-500 font-medium">Slide Type</label>
+                            <select
+                                value={slideTypeFilter}
+                                onChange={(e) => setSlideTypeFilter(e.target.value)}
+                                className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+                            >
+                                <option value="all">All</option>
+                                {Object.keys(slideTypeCounts).map((type) => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs text-gray-500 font-medium">Images</label>
+                            <select
+                                value={imageFilter}
+                                onChange={(e) => setImageFilter(e.target.value as any)}
+                                className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+                            >
+                                <option value="all">All</option>
+                                <option value="with">With images</option>
+                                <option value="without">Without images</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs text-gray-500 font-medium">SmartArt</label>
+                            <select
+                                value={smartartFilter}
+                                onChange={(e) => setSmartartFilter(e.target.value)}
+                                className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+                            >
+                                <option value="all">All</option>
+                                <option value="any">Any SmartArt</option>
+                                {Object.keys(smartartTypeCounts).map((type) => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setSlideTypeFilter('all');
+                                setImageFilter('all');
+                                setSmartartFilter('all');
+                            }}
+                            className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        >
+                            Clear Filters
+                        </button>
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-100">
+                        <label className="text-xs text-gray-500 font-medium">Go to slide #</label>
+                        <div className="mt-1 flex items-center gap-2">
+                            <input
+                                type="number"
+                                min={1}
+                                value={gotoSlideInput}
+                                onChange={(e) => setGotoSlideInput(e.target.value)}
+                                ref={gotoInputRef}
+                                className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+                            />
+                            <button
+                                onClick={() => {
+                                    const target = parseInt(gotoSlideInput, 10);
+                                    if (!Number.isFinite(target)) return;
+                                    const idx = allSlides.findIndex((s) => s.order === target);
+                                    if (idx >= 0) {
+                                        setCurrentSlideIndex(idx);
+                                        setGridView(false);
+                                        setGotoSlideInput('');
+                                        setStatsPanelOpen(false);
+                                    }
+                                }}
+                                className="px-3 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                            >
+                                Go
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {statsPanelOpen && (
+                <div
+                    className="fixed inset-0 bg-black/10 z-[60]"
+                    onClick={() => setStatsPanelOpen(false)}
+                />
+            )}
+
             {/* Main */}
             <div className="flex-1 flex flex-col h-full overflow-hidden relative">
                 <div className="h-16 border-b border-gray-200 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md z-20">
@@ -983,6 +1384,23 @@ export const ViewerPage: React.FC = () => {
                         ) : (
                             <>
                                 <h1 className="text-lg font-bold truncate max-w-lg">{viewMode === 'json' ? 'JSON' : displayName}</h1>
+                                {presentationInfo?.dataRepoPath && (
+                                    <button
+                                        onClick={async (e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            try {
+                                                await navigator.clipboard.writeText(presentationInfo.dataRepoPath || '');
+                                            } catch (err) {
+                                                console.error('Failed to copy path:', err);
+                                            }
+                                        }}
+                                        className="ml-2 p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full"
+                                        title="Copy data repository path"
+                                    >
+                                        <FolderOpen className="w-4 h-4" />
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => setSearchOpen(true)}
                                     className="ml-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
@@ -1010,6 +1428,23 @@ export const ViewerPage: React.FC = () => {
                             {showThumbnail ? <Eye className="w-5 h-5"/> : <EyeOff className="w-5 h-5"/>}
                         </button>
                         <button onClick={() => setViewMode(viewMode === 'slides' ? 'json' : 'slides')} className="p-2 hover:bg-gray-100 rounded-full" title="JSON view"><Code className="w-5 h-5"/></button>
+                        <button
+                            onClick={() => setScreenshotPanelOpen(true)}
+                            className={clsx(
+                                "p-2 rounded-full",
+                                generatingScreenshots ? "bg-amber-100 text-amber-700" : "hover:bg-amber-100 text-gray-600 hover:text-amber-700"
+                            )}
+                            title="Screenshot tools"
+                        >
+                            {generatingScreenshots ? <Loader2 className="w-5 h-5 animate-spin"/> : <Camera className="w-5 h-5"/>}
+                        </button>
+                        <button
+                            onClick={() => setStatsPanelOpen(true)}
+                            className="p-2 hover:bg-gray-100 text-gray-600 hover:text-indigo-700 rounded-full"
+                            title="Slide stats and filters"
+                        >
+                            <Info className="w-5 h-5"/>
+                        </button>
                         <a
                             href={`/api/presentations/${id}/export`}
                             className="p-2 hover:bg-green-100 text-gray-600 hover:text-green-700 rounded-full"
@@ -1241,8 +1676,8 @@ export const ViewerPage: React.FC = () => {
                                 gridZoom === 5 && "grid-cols-5",
                                 gridZoom === 6 && "grid-cols-6"
                             )}>
-                                {allSlides.map((slide, idx) => {
-                                    const hasScreenshot = screenshotsStatus?.hasScreenshots;
+                                {filteredSlideEntries.map(({ slide, idx }) => {
+                                    const hasScreenshot = hasSlideScreenshot(slide.order);
                                     const hasSemanticContent = slide.content.some(b =>
                                         ['comparison', 'sequence', 'text_with_visual', 'definition'].includes(b.type)
                                     );
@@ -1287,7 +1722,7 @@ export const ViewerPage: React.FC = () => {
                                                 <div className="aspect-[16/9] bg-gray-100">
                                                     {hasScreenshot ? (
                                                         <img
-                                                            src={getScreenshotUrl(id!, slide.order)}
+                                                            src={screenshotUrl(slide.order)}
                                                             alt={`Slide ${slide.order}`}
                                                             className="w-full h-full object-cover"
                                                         />
@@ -1328,7 +1763,10 @@ export const ViewerPage: React.FC = () => {
 
                                             {/* Title */}
                                             <div className="p-2 bg-white border-t border-gray-100">
-                                                <p className="text-xs font-medium text-gray-700 truncate">{slide.title || `Slide ${slide.order}`}</p>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="text-xs font-medium text-gray-700 truncate">{slide.title || `Slide ${slide.order}`}</p>
+                                                    <span className="text-[10px] font-mono text-gray-400">#{slide.order}</span>
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -1339,14 +1777,14 @@ export const ViewerPage: React.FC = () => {
                         /* Normal Slide View */
                         <div className="max-w-4xl w-full bg-white shadow-xl border border-gray-200 rounded-3xl p-12 min-h-[700px] mb-12 relative">
                             {/* Screenshot Thumbnail */}
-                            {showThumbnail && screenshotsStatus?.hasScreenshots && (
+                            {showThumbnail && hasSlideScreenshot(currentSlide?.order) && (
                                 <div className="absolute top-6 right-6 z-10">
                                     <div
                                         className="relative group cursor-pointer"
                                         onClick={() => setThumbnailModal(true)}
                                     >
                                         <img
-                                            src={getScreenshotUrl(id!, currentSlide.order)}
+                                            src={screenshotUrl(currentSlide.order)}
                                             alt="Slide screenshot"
                                             className="w-48 h-auto rounded-lg shadow-lg border border-gray-200 transition-transform group-hover:scale-105"
                                         />
@@ -1358,7 +1796,7 @@ export const ViewerPage: React.FC = () => {
                             )}
 
                             {/* Slide Content */}
-                            <div className={clsx(showThumbnail && screenshotsStatus?.hasScreenshots && "pr-52")}>
+                            <div className={clsx(showThumbnail && hasSlideScreenshot(currentSlide?.order) && "pr-52")}>
                                 {(() => {
                                     // Pre-compute which block indices should show YouTube embeds
                                     // This avoids mutation during render (which breaks in React StrictMode)
@@ -1678,7 +2116,7 @@ ${additionalPrompt ? `\n=== ADDITIONAL INSTRUCTIONS ===\n${additionalPrompt}` : 
                                                 </div>
                                                 <button
                                                     onClick={() => {
-                                                        const url = getScreenshotUrl(id!, currentSlide.order);
+                                                        const url = `${getScreenshotUrl(id!, currentSlide.order)}?v=${screenshotVersion}`;
                                                         setPreviewImage(url);
                                                         setPreviewFile(null); // Will fetch from URL
                                                         setShowPreview(true);
@@ -1941,7 +2379,7 @@ Context slides: ${contextSlidesBefore} before, ${contextSlidesAfter} after`}
             </div>
 
             {/* Thumbnail Modal */}
-            {thumbnailModal && screenshotsStatus?.hasScreenshots && (
+            {thumbnailModal && hasSlideScreenshot(currentSlide?.order) && (
                 <div
                     className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-8"
                     onClick={() => setThumbnailModal(false)}
@@ -1954,13 +2392,90 @@ Context slides: ${contextSlidesBefore} before, ${contextSlidesAfter} after`}
                             <X className="w-6 h-6" />
                         </button>
                         <img
-                            src={getScreenshotUrl(id!, currentSlide.order)}
+                            src={screenshotUrl(currentSlide.order)}
                             alt="Slide screenshot"
                             className="w-full h-auto rounded-lg shadow-2xl"
                             onClick={(e) => e.stopPropagation()}
                         />
                         <div className="text-center mt-4 text-white text-sm">
                             Slide {currentSlide.order}: {currentSlide.title || 'Untitled'}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Keyboard Shortcuts Modal */}
+            {showShortcutModal && (
+                <div
+                    className="fixed inset-0 bg-black/40 z-[80] flex items-center justify-center p-6"
+                    onClick={() => setShowShortcutModal(false)}
+                >
+                    <div
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-gray-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-gray-900">Keyboard Shortcuts</h3>
+                            <button
+                                onClick={() => setShowShortcutModal(false)}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div className="p-4 space-y-3 text-sm">
+                            <div className="flex items-center justify-between">
+                                <span>Previous / Next slide</span>
+                                <span className="font-mono text-gray-500">← / →</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Grid view</span>
+                                <span className="font-mono text-gray-500">g</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Toggle thumbnail</span>
+                                <span className="font-mono text-gray-500">t</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Search</span>
+                                <span className="font-mono text-gray-500">/</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Convert with Gemini</span>
+                                <span className="font-mono text-gray-500">c</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Screenshot tools</span>
+                                <span className="font-mono text-gray-500">s</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Stats & filters</span>
+                                <span className="font-mono text-gray-500">i</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Generate all screenshots</span>
+                                <span className="font-mono text-gray-500">Shift+A</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Generate missing screenshots</span>
+                                <span className="font-mono text-gray-500">Shift+M</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Generate current screenshot</span>
+                                <span className="font-mono text-gray-500">Shift+S</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Go to slide</span>
+                                <span className="font-mono text-gray-500">j</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Show shortcuts</span>
+                                <span className="font-mono text-gray-500">?</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Close panels</span>
+                                <span className="font-mono text-gray-500">Esc</span>
+                            </div>
                         </div>
                     </div>
                 </div>

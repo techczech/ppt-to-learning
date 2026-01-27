@@ -34,6 +34,7 @@ export interface ManagedPresentation {
     uploadedAt: string;
     status: 'pending' | 'processing' | 'completed' | 'failed';
     resultId?: string;
+    dataRepoPath?: string;
     // Extracted PPTX metadata
     title?: string;
     author?: string;
@@ -618,8 +619,8 @@ export const getScreenshotsStatus = async (id: string): Promise<ScreenshotsStatu
     return res.data;
 };
 
-export const generateScreenshots = async (id: string) => {
-    const res = await api.post(`/generate-screenshots/${id}`);
+export const generateScreenshots = async (id: string, options?: { slides?: number[] }) => {
+    const res = await api.post(`/generate-screenshots/${id}`, options || {});
     return res.data;
 };
 

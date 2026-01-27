@@ -8,7 +8,7 @@ import SlideLibrary from './pages/SlideLibrary';
 import { CollectionSidebar } from './components/CollectionSidebar';
 import { CollectionModal, FolderModal } from './components/CollectionModal';
 import { TagFilter, TagListDisplay } from './components/TagPills';
-import { BookOpen, FileText, RefreshCw, Clock, Settings, Trash2, Pencil, Check, X, Search, Library, CheckSquare, Square, FolderInput, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { BookOpen, FileText, RefreshCw, Clock, Settings, Trash2, Pencil, Check, X, Search, Library, CheckSquare, Square, FolderInput, ChevronDown, ChevronUp, Download, FolderOpen } from 'lucide-react';
 import {
     getManagedPresentations, reprocessPresentation, deletePresentation, updatePresentation,
     getCollections, createCollection, updateCollection as apiUpdateCollection, deleteCollection as apiDeleteCollection,
@@ -645,16 +645,33 @@ const Home: React.FC = () => {
                                                                             <TagListDisplay tags={tags} tagIds={file.tagIds} />
                                                                         </div>
                                                                     )}
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </Link>
-                                                    <div className={`ml-3 flex items-center gap-1 flex-shrink-0 ${selectionMode ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
-                                                        {/* Move button - always available */}
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
+                                                </>
+                                            )}
+                                        </div>
+                                    </Link>
+                                    <div className={`ml-3 flex items-center gap-1 flex-shrink-0 ${selectionMode ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                                        {file.dataRepoPath && (
+                                            <button
+                                                onClick={async (e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    try {
+                                                        await navigator.clipboard.writeText(file.dataRepoPath || '');
+                                                    } catch (err) {
+                                                        console.error('Failed to copy path:', err);
+                                                    }
+                                                }}
+                                                title="Copy data repository path"
+                                                className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition"
+                                            >
+                                                <FolderOpen className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                        {/* Move button - always available */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
                                                                 setSelectedPresentationIds(new Set([file.id]));
                                                                 setMoveModalOpen(true);
                                                             }}

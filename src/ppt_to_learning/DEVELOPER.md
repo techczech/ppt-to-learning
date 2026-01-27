@@ -18,10 +18,36 @@ The system is modularized into three main components:
 
 *   **Slide Processing**: Iterates through slides and shapes. Shapes are sorted by position (top-to-bottom, left-to-right) to maintain reading order.
 *   **Shape Handling**:
-    *   **Text**: Extracted from TextFrames.
+    *   **Text**: Extracted from TextFrames with formatting preserved via `TextRun` objects.
     *   **Images**: Extracted from Picture shapes and saved to the media directory.
     *   **SmartArt**: Detected via `GraphicFrame` type (ID 6). Delegated to `SmartArtExtractor`.
+    *   **Auto Shapes**: Arrows, connectors, and symbols extracted via `_extract_auto_shape()`.
 *   **Section Extraction**: Supports both native `python-pptx` sections (preferred) and a raw XML fallback for compatibility.
+
+### Text Formatting
+
+Text formatting is preserved using `TextRun` objects in `ListItem.runs`. Each run captures:
+- `text`: The text content
+- `bold`, `italic`, `underline`: Boolean formatting flags
+- `url`: Hyperlink URL if present
+- `font_size`: Size in points
+- `font_color`: Hex color string (e.g., "FF0000")
+
+The `runs` array is only populated when formatting is present (to avoid bloating output for plain text).
+
+### Auto Shape Extraction
+
+Meaningful shapes (arrows, connectors, symbols like ≠, +, -, etc.) are extracted as `ShapeBlock` objects:
+- `shape_type`: The auto shape type (e.g., "right_arrow", "math_not_equal")
+- `shape_name`: PowerPoint shape name
+- `position`: Left, top, width, height in EMUs
+- `fill_color`, `line_color`: Hex colors
+- `rotation`: Angle in degrees
+- `animation_order`: Entry order in slide animations (1-based)
+
+### Animation Order Extraction
+
+The `_extract_animation_map()` method parses the slide's `p:timing` XML to extract animation sequences. It maps shape IDs to their animation entry order, useful for understanding slide build order.
 
 ### SmartArtExtractor (`smartart_extractor.py`)
 

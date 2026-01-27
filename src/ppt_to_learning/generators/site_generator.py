@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import shutil
+from pathlib import Path
 from typing import List
 from ..core.models import Presentation
 from ..core.interfaces import ISiteGenerator
@@ -30,10 +31,14 @@ class SiteGenerator(ISiteGenerator):
             if p.sections and p.sections[0].slides:
                 title = p.sections[0].slides[0].title or title
             
+            presentation_dir = Path(os.path.join(output_dir, p.metadata.id))
+            data_repo_dir = presentation_dir if presentation_dir.exists() else Path(output_dir)
+
             index_items.append({
                 "id": p.metadata.id,
                 "file": json_filename,
-                "title": title
+                "title": title,
+                "data_repo_dir": str(data_repo_dir.resolve())
             })
 
         # 2. Generate HTML
@@ -52,7 +57,13 @@ class SiteGenerator(ISiteGenerator):
             file_path = item["file"]
             title = item["title"]
             item_id = item["id"]
-            list_html += f'<li><a href="viewer.html?file=json/{file_path}">{title} ({item_id})</a></li>\n'
+            data_repo_uri = Path(item["data_repo_dir"]).as_uri()
+            list_html += (
+                f'<li>'
+                f'<a href="viewer.html?file=json/{file_path}">{title} ({item_id})</a>'
+                f' — <a href="{data_repo_uri}">Data Repository Path</a>'
+                f'</li>\n'
+            )
             
         content = content.replace("<!-- COURSE_LIST_ITEMS_PLACEHOLDER -->", list_html)
         

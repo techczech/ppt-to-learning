@@ -109,6 +109,87 @@ def generate_slide_pngs(
         return png_paths
 
 
+def generate_slide_pngs_for_slides(
+    pptx_path: Path,
+    output_dir: Path,
+    slides: list[int],
+    dpi: int = 150,
+    on_progress: Optional[callable] = None
+) -> list[Path]:
+    """Generate PNG screenshots for a specific list of slide numbers (1-based)."""
+    if not slides:
+        return []
+
+    slides = sorted({int(s) for s in slides if int(s) > 0})
+    if not slides:
+        return []
+
+    if not check_libreoffice():
+        raise RuntimeError(
+            "LibreOffice is not installed. Install with: brew install --cask libreoffice"
+        )
+
+    screenshots_dir = output_dir / "screenshots"
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+    if on_progress:
+        on_progress(0, 100, "Converting PPTX to PDF...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        result = subprocess.run(
+            [
+                "soffice",
+                "--headless",
+                "--invisible",
+                "--convert-to", "pdf",
+                "--outdir", str(tmp_path),
+                str(pptx_path)
+            ],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        pdf_name = pptx_path.stem + ".pdf"
+        pdf_path = tmp_path / pdf_name
+
+        if not pdf_path.exists():
+            pdfs = list(tmp_path.glob("*.pdf"))
+            if pdfs:
+                pdf_path = pdfs[0]
+            else:
+                raise RuntimeError(
+                    f"LibreOffice did not generate PDF. Output: {result.stdout} {result.stderr}"
+                )
+
+        min_page = min(slides)
+        max_page = max(slides)
+
+        if on_progress:
+            on_progress(30, 100, "Converting selected PDF pages to PNG...")
+
+        images = convert_from_path(pdf_path, dpi=dpi, first_page=min_page, last_page=max_page)
+        png_paths = []
+
+        for idx, img in enumerate(images):
+            page_num = min_page + idx
+            if page_num not in slides:
+                continue
+            png_path = screenshots_dir / f"slide_{page_num:04d}.png"
+            img.save(png_path, "PNG", optimize=True)
+            png_paths.append(png_path)
+
+            if on_progress:
+                progress = 30 + int(((idx + 1) / len(images)) * 70)
+                on_progress(progress, 100, f"Saved slide {page_num}")
+
+        if on_progress:
+            on_progress(100, 100, f"Generated {len(png_paths)} screenshots")
+
+        return png_paths
+
+
 def get_screenshot_path(output_dir: Path, slide_number: int) -> Path:
     """Get the expected path for a slide screenshot."""
     return output_dir / "screenshots" / f"slide_{slide_number:04d}.png"

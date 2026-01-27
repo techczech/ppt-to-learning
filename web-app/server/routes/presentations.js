@@ -2,7 +2,6 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 const archiver = require('archiver');
 const db = require('../db');
 const { getDataPaths } = require('../config');
@@ -110,6 +109,9 @@ router.post('/generate-screenshots/:id', (req, res) => {
 
     const sourcePath = path.join(getSourcesDir(), presentation.filename);
     const outputDir = path.join(getStorageDir(), id);
+    const slides = Array.isArray(req.body?.slides)
+        ? req.body.slides.map(n => parseInt(n, 10)).filter(n => Number.isFinite(n))
+        : null;
 
     if (!fs.existsSync(sourcePath)) {
         return res.status(404).json({ error: 'Source PPTX file not found' });
@@ -120,17 +122,26 @@ router.post('/generate-screenshots/:id', (req, res) => {
         '-c',
         `
 from pathlib import Path
-from src.ppt_to_learning.extractors.png_generator import generate_slide_pngs, check_libreoffice
+from src.ppt_to_learning.extractors.png_generator import generate_slide_pngs, generate_slide_pngs_for_slides, check_libreoffice
 
 if not check_libreoffice():
     print("ERROR: LibreOffice not installed")
     exit(1)
 
-pngs = generate_slide_pngs(
-    Path("${sourcePath.replace(/\\/g, '\\\\')}"),
-    Path("${outputDir.replace(/\\/g, '\\\\')}"),
-    dpi=150
-)
+slides = ${slides ? JSON.stringify(slides) : 'None'}
+if slides:
+    pngs = generate_slide_pngs_for_slides(
+        Path("${sourcePath.replace(/\\/g, '\\\\')}"),
+        Path("${outputDir.replace(/\\/g, '\\\\')}"),
+        slides=slides,
+        dpi=150
+    )
+else:
+    pngs = generate_slide_pngs(
+        Path("${sourcePath.replace(/\\/g, '\\\\')}"),
+        Path("${outputDir.replace(/\\/g, '\\\\')}"),
+        dpi=150
+    )
 print(f"Generated {len(pngs)} screenshots")
         `
     ], { cwd: ROOT_DIR });
@@ -172,7 +183,12 @@ router.get('/screenshots/:id', (req, res) => {
 
 // List Presentations
 router.get('/presentations', (req, res) => {
-    res.json(db.getPresentations().map(p => ({ ...p, resultId: path.parse(p.filename).name })));
+    const storageDir = getStorageDir();
+    res.json(db.getPresentations().map(p => ({
+        ...p,
+        resultId: path.parse(p.filename).name,
+        dataRepoPath: path.join(storageDir, p.id)
+    })));
 });
 
 // Delete Presentation
@@ -264,10 +280,14 @@ router.get('/presentations/:id/slides', (req, res) => {
     const presentation = db.getPresentations().find(p => p.id === id);
     if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
 
-    const jsonPath = path.join(getStorageDir(), id, 'json', `${id}.json`);
-    if (!fs.existsSync(jsonPath)) {
-        return res.status(404).json({ error: 'Presentation JSON not found' });
-    }
+    const storageDir = path.join(getStorageDir(), id);
+    const legacyPath = path.join(storageDir, 'json', `${id}.json`);
+    const unifiedPath = path.join(storageDir, 'presentation.json');
+    const nestedPath = path.join(storageDir, id, 'presentation.json');
+    const jsonPath = fs.existsSync(legacyPath)
+        ? legacyPath
+        : (fs.existsSync(unifiedPath) ? unifiedPath : (fs.existsSync(nestedPath) ? nestedPath : null));
+    if (!jsonPath) return res.status(404).json({ error: 'Presentation JSON not found' });
 
     try {
         const presentationJson = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
@@ -283,7 +303,7 @@ router.get('/presentations/:id/slides', (req, res) => {
                 const promoted = promotedSlides.find(s => s.sourceSlideOrder === slideOrder);
 
                 // Get screenshot URL
-                const screenshotPath = path.join(getStorageDir(), id, 'screenshots', `slide_${String(slideOrder).padStart(4, '0')}.png`);
+                const screenshotPath = path.join(storageDir, 'screenshots', `slide_${String(slideOrder).padStart(4, '0')}.png`);
                 const hasScreenshot = fs.existsSync(screenshotPath);
 
                 // Extract content types
@@ -331,11 +351,14 @@ router.get('/presentations/:id/export', (req, res) => {
     if (!presentation) return res.status(404).json({ error: 'Presentation not found' });
 
     const storageDir = path.join(getStorageDir(), id);
-    const jsonPath = path.join(storageDir, 'json', `${id}.json`);
+    const legacyJson = path.join(storageDir, 'json', `${id}.json`);
+    const unifiedJson = path.join(storageDir, 'presentation.json');
+    const nestedJson = path.join(storageDir, id, 'presentation.json');
+    const jsonPath = fs.existsSync(legacyJson)
+        ? legacyJson
+        : (fs.existsSync(unifiedJson) ? unifiedJson : (fs.existsSync(nestedJson) ? nestedJson : null));
 
-    if (!fs.existsSync(jsonPath)) {
-        return res.status(404).json({ error: 'Presentation data not found' });
-    }
+    if (!jsonPath) return res.status(404).json({ error: 'Presentation data not found' });
 
     // Sanitize filename for download
     const safeName = presentation.originalName
@@ -359,7 +382,9 @@ router.get('/presentations/:id/export', (req, res) => {
     archive.file(jsonPath, { name: 'presentation.json' });
 
     // Add media directory if exists
-    const mediaDir = path.join(storageDir, 'media');
+    const mediaDir = fs.existsSync(path.join(storageDir, 'media'))
+        ? path.join(storageDir, 'media')
+        : path.join(storageDir, id, 'media');
     if (fs.existsSync(mediaDir)) {
         archive.directory(mediaDir, 'media');
     }
@@ -376,15 +401,26 @@ router.get('/presentations/:id/export', (req, res) => {
 // View Presentation JSON
 router.get('/view/:id/:resultId', (req, res) => {
     const { id, resultId } = req.params;
-    const filePath = path.join(getStorageDir(), id, 'json', `${resultId}.json`);
-    if (fs.existsSync(filePath)) res.sendFile(filePath);
-    else res.status(404).json({ error: 'File not found' });
+    const storageDir = path.join(getStorageDir(), id);
+    const legacyPath = path.join(storageDir, 'json', `${resultId}.json`);
+    const unifiedPath = path.join(storageDir, 'presentation.json');
+    const nestedPath = path.join(storageDir, id, 'presentation.json');
+    if (fs.existsSync(legacyPath)) return res.sendFile(legacyPath);
+    if (fs.existsSync(unifiedPath)) return res.sendFile(unifiedPath);
+    if (fs.existsSync(nestedPath)) return res.sendFile(nestedPath);
+    return res.status(404).json({ error: 'File not found' });
 });
 
 // Save Presentation Edits
 router.put('/view/:id/:resultId', (req, res) => {
     const { id, resultId } = req.params;
-    const filePath = path.join(getStorageDir(), id, 'json', `${resultId}.json`);
+    const storageDir = path.join(getStorageDir(), id);
+    const legacyPath = path.join(storageDir, 'json', `${resultId}.json`);
+    const unifiedPath = path.join(storageDir, 'presentation.json');
+    const nestedPath = path.join(storageDir, id, 'presentation.json');
+    const filePath = fs.existsSync(legacyPath)
+        ? legacyPath
+        : (fs.existsSync(unifiedPath) ? unifiedPath : nestedPath);
 
     try {
         fs.writeFileSync(filePath, JSON.stringify(req.body, null, 2));
