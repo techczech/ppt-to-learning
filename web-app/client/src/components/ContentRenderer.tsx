@@ -336,11 +336,21 @@ export const ContentRenderer: React.FC<ContentRendererProps> = ({
                 <div className={`${marginY} overflow-x-auto rounded-lg border border-gray-200 shadow-sm`}>
                     <table className="min-w-full divide-y divide-gray-200 bg-white">
                         <tbody className="divide-y divide-gray-100">
-                            {block.rows?.map((row: string[], ri: number) => (
+                            {block.rows?.map((row: any[], ri: number) => (
                                 <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                                    {row.map((cell: string, ci: number) => (
-                                        <td key={ci} className={`px-4 py-3 ${compact ? 'text-xs' : 'text-sm'} text-gray-700 border-r border-gray-100 last:border-0 whitespace-pre-wrap`}>{cell}</td>
-                                    ))}
+                                    {row.map((cell: any, ci: number) => {
+                                        const cellText = typeof cell === 'string' ? cell : (cell?.text ?? '');
+                                        const isHeader = typeof cell === 'object' && cell?.is_header;
+                                        const CellTag = isHeader ? 'th' : 'td';
+                                        return (
+                                            <CellTag
+                                                key={ci}
+                                                className={`px-4 py-3 ${compact ? 'text-xs' : 'text-sm'} text-gray-700 border-r border-gray-100 last:border-0 whitespace-pre-wrap text-left ${isHeader ? 'font-semibold bg-gray-50' : ''}`}
+                                            >
+                                                {cellText}
+                                            </CellTag>
+                                        );
+                                    })}
                                 </tr>
                             ))}
                         </tbody>
