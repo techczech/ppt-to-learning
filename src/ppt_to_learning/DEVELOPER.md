@@ -20,7 +20,7 @@ The system is modularized into three main components:
 *   **Shape Handling**:
     *   **Text**: Extracted from TextFrames with formatting preserved via `TextRun` objects.
     *   **Images**: Extracted from Picture shapes and saved to the media directory.
-    *   **SmartArt**: Detected via `GraphicFrame` type (ID 6). Delegated to `SmartArtExtractor`.
+    *   **SmartArt**: Detected via DiagramML `graphicData` (including `GraphicFrame` and `PlaceholderGraphicFrame`). Delegated to `SmartArtExtractor`.
     *   **Auto Shapes**: Arrows, connectors, and symbols extracted via `_extract_auto_shape()`.
 *   **Section Extraction**: Supports both native `python-pptx` sections (preferred) and a raw XML fallback for compatibility.
 

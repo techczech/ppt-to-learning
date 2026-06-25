@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Any
 from pptx.shapes.graphfrm import GraphicFrame
 from ..core.models import SmartArtNode
@@ -29,9 +30,10 @@ class SmartArtExtractor:
                 return None
 
             root = etree.fromstring(data_part.blob)
+            icon_prefix = self._build_icon_prefix(shape, slide_part, rel_id)
 
             # 1. Extract all raw points
-            nodes_map = self._parse_points(root, data_part, file_id, media_output_dir)
+            nodes_map = self._parse_points(root, data_part, file_id, media_output_dir, icon_prefix)
             
             # 2. Build relationship maps
             visual_to_data = {}
@@ -120,12 +122,22 @@ class SmartArtExtractor:
         except AttributeError:
             return None
 
-    def _parse_points(self, root, data_part, file_id, media_dir) -> Dict[str, SmartArtNode]:
+    def _build_icon_prefix(self, shape, slide_part, rel_id: str) -> str:
+        """Build a per-shape/per-slide prefix to avoid icon filename collisions."""
+        slide_name = "slide"
+        partname = getattr(slide_part, "partname", None)
+        if partname:
+            slide_name = os.path.splitext(os.path.basename(str(partname)))[0]
+        shape_id = getattr(shape, "shape_id", "shape")
+        raw = f"{slide_name}_sh{shape_id}_{rel_id}"
+        return re.sub(r"[^A-Za-z0-9_]", "_", raw)
+
+    def _parse_points(self, root, data_part, file_id, media_dir, icon_prefix: str) -> Dict[str, SmartArtNode]:
         nodes = {}
         for pt in root.findall(".//dgm:pt", self.NAMESPACES):
             mid = pt.get("modelId")
             text = self._extract_text(pt)
-            icon, icon_alt = self._extract_icon_and_alt(pt, data_part, file_id, media_dir)
+            icon, icon_alt = self._extract_icon_and_alt(pt, data_part, file_id, media_dir, icon_prefix)
             nodes[mid] = SmartArtNode(id=mid, text=text, icon=icon, icon_alt=icon_alt)
         return nodes
 
@@ -138,7 +150,7 @@ class SmartArtExtractor:
         if not txt: txt = get_t(pt.find(".//dgm:txBody", self.NAMESPACES))
         return txt
 
-    def _extract_icon_and_alt(self, pt, data_part, file_id, media_dir) -> (Optional[str], Optional[str]):
+    def _extract_icon_and_alt(self, pt, data_part, file_id, media_dir, icon_prefix: str) -> (Optional[str], Optional[str]):
         icon, icon_alt = None, None
         cnvpr = pt.find(".//a:cNvPr", self.NAMESPACES)
         if cnvpr is not None:
@@ -152,7 +164,7 @@ class SmartArtExtractor:
                     ext = p.content_type.split('/')[-1].replace('x-', '').replace('+xml', '')
                     # Sanitize modelId for filename
                     mid = pt.get('modelId').replace('{','').replace('}','').replace('-','')
-                    fname = f"sa_{mid}.{ext}"
+                    fname = f"sa_{icon_prefix}_{mid}.{ext}"
                     path = os.path.join(media_dir, fname)
                     with open(path, "wb") as f: f.write(p.blob)
                     icon = f"media/{file_id}/{fname}"

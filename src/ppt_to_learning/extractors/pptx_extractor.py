@@ -160,6 +160,17 @@ class PptxExtractor(IPresentationExtractor):
 
         return None
 
+    def _is_graphic_frame_like(self, shape) -> bool:
+        """Return True for graphic frame-like shapes, including placeholders."""
+        if "GraphicFrame" in type(shape).__name__:
+            return True
+        try:
+            element = shape.element if hasattr(shape, "element") else shape._element
+            graphic = getattr(element, "graphic", None)
+            return getattr(graphic, "graphicData", None) is not None
+        except AttributeError:
+            return False
+
     def _process_slide(self, slide, order: int, file_id: str, media_dir: str):
         content = []
         notes = ""
@@ -215,8 +226,7 @@ class PptxExtractor(IPresentationExtractor):
                 continue
 
             # SmartArt
-            is_graphic_frame = shape.shape_type == 6 or type(shape).__name__ == 'GraphicFrame'
-            if is_graphic_frame:
+            if self._is_graphic_frame_like(shape):
                 sa_data = self.smartart_extractor.extract(shape, slide.part, file_id, media_dir)
                 if sa_data:
                     def dict_to_node(d):
